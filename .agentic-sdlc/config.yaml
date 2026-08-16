@@ -1,6 +1,6 @@
 schema_version: 1
 project_name: Agentic SDLC
-applied_plugin_version: bootstrap
+applied_plugin_version: 0.1.0
 release_channel: stable
 session_title_format: "{project_name} #{issue_number} - {issue_title}"
-bootstrap_exception: true
+bootstrap_exception: false

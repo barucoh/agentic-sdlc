@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: release
@@ -37,3 +38,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "v${{ steps.version.outputs.version }}" --target "$GITHUB_SHA" --generate-notes --title "v${{ steps.version.outputs.version }}"
+      - if: steps.tag.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          python scripts/set_applied_version.py "$version"
+          branch="automation/upgrade-agentic-sdlc-v$version"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add .agentic-sdlc/config.yaml
+          git commit -m "Upgrade Agentic SDLC to v$version"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" --title "Upgrade Agentic SDLC to v$version" --body "Updates this repository to its newly published Agentic SDLC release. Only the repository owner may merge."

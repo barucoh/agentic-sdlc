@@ -17,3 +17,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: python scripts/validate.py
+      - if: github.event_name == 'pull_request'
+        run: python scripts/check_latest_release.py
