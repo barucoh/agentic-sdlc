@@ -7,10 +7,10 @@ description: Upgrade an existing repository to a newer Agentic SDLC release. Use
 
 1. Read `.agentic-sdlc/config.yaml`, applicable `AGENTS.md`, and repository conventions.
 2. Compare the applied schema/version with the installed plugin version.
-3. Produce a dry run. Classify files as fully managed, managed block, merge, create-if-missing, validate-only, or project-owned.
-4. Stop on ambiguous ownership. Never overwrite project-owned content, existing ADRs, product docs, or source code.
-5. After approval, apply idempotent migrations in version order and preserve local customization.
-6. Update the recorded schema and applied plugin version only after validation succeeds.
-7. Report changed files, preserved customizations, unresolved conflicts, and rollback instructions.
+3. Run `python <plugin-root>/scripts/manage_repository.py dry-run --target <repository> --project-name "<project name>"`. Treat its classifications as authoritative.
+4. Stop on every conflict. Never overwrite project-owned content, existing ADRs, source code, or locally modified managed files whose recorded hash has drifted.
+5. After approval, run the same command with `apply`, then `check`. The operation is deterministic and idempotent; recognized v0.2.0 generated agents migrate to standalone current Codex agent files and the obsolete generated role registry is removed.
+6. The tool writes schema, applied plugin version, and managed hashes only after a conflict-free apply. `check` must pass before completion.
+7. Report changed files, deleted obsolete generated files, preserved customizations, unresolved conflicts, exact validation, and version-control rollback instructions.
 
 Existing sessions are not renamed automatically. Apply new session policy prospectively unless the user requests a one-time rename audit.

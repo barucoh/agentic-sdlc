@@ -5,7 +5,9 @@ Agentic SDLC upgrades have two independent layers.
 1. Update or reinstall the plugin package from its marketplace, then start a new Codex session.
 2. Invoke `upgrade-agentic-sdlc` inside each adopted repository to migrate repository-native artifacts.
 
-The repository migration first reports a dry run. It updates only fully managed files or marked managed blocks, preserves project-owned content, stops on ambiguous ownership, validates the result, and records the applied schema and plugin version only after success.
+The repository migration first reports a deterministic dry run. It updates only recognized managed files or marked managed blocks, preserves project-owned Codex configuration and create-if-missing ADR files, stops on ambiguous ownership or modified managed hashes, validates the result, and records the applied schema and plugin version only after success. Run `python <plugin-root>/scripts/manage_repository.py check --target <repository>` after apply and in drift audits.
+
+The v0.3.0 migration recognizes canonical v0.2.0 generated agent files, converts them to current standalone `.codex/agents/*.toml` contracts, and removes only the exact obsolete generated `.codex/config.toml` role registry. A customized legacy registry stops as a conflict; unrelated project-owned `.codex/config.toml` content is preserved.
 
 Existing sessions are not renamed automatically. New session policies apply prospectively unless the user explicitly requests a rename audit.
 

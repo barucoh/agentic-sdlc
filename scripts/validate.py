@@ -2,7 +2,12 @@
 import json
 import re
 import sys
+import tomllib
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from coordination_protocol import validate_handoff
+import manage_repository
 
 ROOT = Path(__file__).resolve().parents[1]
 errors = []
@@ -20,7 +25,7 @@ if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za
     errors.append("plugin version must be SemVer")
 
 skills = sorted((ROOT / "skills").glob("*/SKILL.md"))
-required = {"bootstrap-agentic-sdlc", "adr-context", "upgrade-agentic-sdlc"}
+required = {"bootstrap-agentic-sdlc", "adr-context", "upgrade-agentic-sdlc", "coordinate-agentic-sdlc"}
 found = {p.parent.name for p in skills}
 missing = required - found
 if missing:
@@ -38,6 +43,10 @@ required_files = [
     ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/docs/decisions/INDEX.md",
     ROOT / "docs/installation.md",
     ROOT / "docs/upgrading.md",
+    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/handoff.schema.json",
+    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/handoff-template.json",
+    ROOT / "scripts/manage_repository.py",
+    ROOT / "scripts/coordination_protocol.py",
 ]
 for path in required_files:
     if not path.is_file():
@@ -52,6 +61,73 @@ applied_version = next(
 )
 if applied_version != "bootstrap" and applied_version != manifest.get("version"):
     errors.append("self-hosted applied version must match the plugin manifest")
+
+if "schema_version: 2" not in config:
+    errors.append("self-hosted repository must use Agentic SDLC schema 2")
+
+expected_roles = {
+    "coordinator",
+    "product",
+    "architecture",
+    "implementation",
+    "qa",
+    "reviewer",
+    "knowledge_steward",
+}
+template_root = ROOT / "skills/bootstrap-agentic-sdlc/assets/repository"
+agent_root = template_root / ".codex/agents"
+role_names = set()
+contract_sections = (
+    "Inputs:",
+    "Outputs:",
+    "Terminal states:",
+    "Escalation conditions:",
+    "Forbidden actions:",
+    "Permission posture:",
+    "Authority:",
+)
+for path in sorted(agent_root.glob("*.toml")):
+    try:
+        value = tomllib.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        errors.append(f"invalid agent TOML {path.relative_to(ROOT)}: {exc}")
+        continue
+    role_names.add(value.get("name"))
+    if not value.get("description") or not value.get("developer_instructions"):
+        errors.append(f"agent lacks required current Codex fields: {path.relative_to(ROOT)}")
+    if value.get("sandbox_mode") not in {"read-only", "workspace-write"}:
+        errors.append(f"agent lacks explicit permission posture: {path.relative_to(ROOT)}")
+    for section in contract_sections:
+        if section not in value.get("developer_instructions", ""):
+            errors.append(f"agent contract missing {section} in {path.relative_to(ROOT)}")
+if role_names != expected_roles:
+    errors.append(f"agent roles differ: expected {sorted(expected_roles)}, found {sorted(str(x) for x in role_names)}")
+if (template_root / ".codex/config.toml").exists():
+    errors.append("generated repository must not use obsolete .codex/config.toml role registry")
+
+schema_path = template_root / ".agentic-sdlc/handoff.schema.json"
+template_path = template_root / ".agentic-sdlc/handoff-template.json"
+try:
+    handoff_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    handoff_template = json.loads(template_path.read_text(encoding="utf-8"))
+    errors.extend(f"invalid handoff template: {error}" for error in validate_handoff(handoff_template))
+    terminal_enum = handoff_schema["properties"]["terminal_state"]["enum"]
+    if terminal_enum != ["completed", "changes_requested", "blocked"]:
+        errors.append("handoff terminal states must be completed, changes_requested, and blocked")
+except Exception as exc:
+    errors.append(f"invalid handoff schema/template: {exc}")
+
+try:
+    state_actions, _, _ = manage_repository.plan(ROOT, "Agentic SDLC")
+    drift = [
+        action
+        for action in state_actions
+        if action.classification in {"create", "update", "managed-block-update", "delete", "conflict"}
+    ]
+    if drift:
+        errors.append("self-hosted repository drift: " + ", ".join(f"{a.classification}:{a.path.as_posix()}" for a in drift))
+except Exception as exc:
+    errors.append(f"self-hosted repository state check failed: {exc}")
 
 if errors:
     print("Validation failed:")

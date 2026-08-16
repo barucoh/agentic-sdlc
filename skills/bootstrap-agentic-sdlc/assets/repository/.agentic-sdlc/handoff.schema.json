@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/barucoh/agentic-sdlc/schemas/handoff-1.0.0.json",
+  "title": "Agentic SDLC structured handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "operation_id",
+    "from_role",
+    "to_role",
+    "work_item",
+    "objective",
+    "inputs",
+    "constraints",
+    "adrs",
+    "acceptance_criteria",
+    "outputs",
+    "dependencies",
+    "escalation",
+    "evidence",
+    "residual_risk",
+    "terminal_state"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "operation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "from_role": { "$ref": "#/$defs/role" },
+    "to_role": { "$ref": "#/$defs/role" },
+    "work_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "issue_number", "issue_url", "title"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+        "issue_number": { "type": "integer", "minimum": 1 },
+        "issue_url": { "type": "string", "format": "uri" },
+        "title": { "type": "string", "minLength": 1 },
+        "pull_request_url": { "type": ["string", "null"], "format": "uri" },
+        "commit_sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "objective": { "type": "string", "minLength": 1 },
+    "inputs": { "$ref": "#/$defs/stringList" },
+    "constraints": { "$ref": "#/$defs/stringList" },
+    "adrs": { "$ref": "#/$defs/stringList" },
+    "acceptance_criteria": { "$ref": "#/$defs/stringList" },
+    "outputs": { "$ref": "#/$defs/stringList" },
+    "dependencies": { "$ref": "#/$defs/stringList" },
+    "escalation": { "$ref": "#/$defs/stringList" },
+    "evidence": { "$ref": "#/$defs/stringList" },
+    "residual_risk": { "$ref": "#/$defs/stringList" },
+    "terminal_state": {
+      "type": "string",
+      "enum": ["completed", "changes_requested", "blocked"]
+    }
+  },
+  "$defs": {
+    "role": {
+      "type": "string",
+      "enum": ["coordinator", "product", "architecture", "implementation", "qa", "reviewer", "knowledge_steward", "human_owner"]
+    },
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  }
+}

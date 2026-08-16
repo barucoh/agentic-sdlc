@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0.0",
+  "operation_id": "00000000-0000-4000-8000-000000000000",
+  "from_role": "coordinator",
+  "to_role": "implementation",
+  "work_item": {
+    "repository": "OWNER/REPOSITORY",
+    "issue_number": 1,
+    "issue_url": "https://github.com/OWNER/REPOSITORY/issues/1",
+    "title": "Issue title",
+    "pull_request_url": null,
+    "commit_sha": null
+  },
+  "objective": "State the one outcome this handoff requests.",
+  "inputs": ["Authoritative issue and prior accepted handoffs"],
+  "constraints": ["Repository policy and human merge authority"],
+  "adrs": ["No relevant ADRs"],
+  "acceptance_criteria": ["Observable completion condition"],
+  "outputs": ["Expected durable or evidence output"],
+  "dependencies": ["None"],
+  "escalation": ["Stop when authority or delivery state is ambiguous"],
+  "evidence": ["Authoritative URL, commit, check, or reproducible command"],
+  "residual_risk": ["Known limitation or None"],
+  "terminal_state": "completed"
+}
