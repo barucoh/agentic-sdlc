@@ -46,6 +46,12 @@ for path in required_files:
 config = (ROOT / ".agentic-sdlc/config.yaml").read_text(encoding="utf-8")
 if "bootstrap_exception: false" in config and "applied_plugin_version: bootstrap" in config:
     errors.append("non-bootstrap configuration cannot use bootstrap version")
+applied_version = next(
+    (line.split(":", 1)[1].strip() for line in config.splitlines() if line.startswith("applied_plugin_version:")),
+    None,
+)
+if applied_version != "bootstrap" and applied_version != manifest.get("version"):
+    errors.append("self-hosted applied version must match the plugin manifest")
 
 if errors:
     print("Validation failed:")

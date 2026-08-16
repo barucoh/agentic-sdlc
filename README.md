@@ -30,4 +30,4 @@ Pull requests target `main`. Only the repository owner may merge. Versions are s
 
 ## Self-hosting
 
-The initial release uses the repository source as a bootstrap exception. After `v0.1.0` is published, this repository pins and uses its latest stable release. Release `N` is developed with the latest prior stable release, then an owner-merged upgrade PR moves the repository to `N`.
+This repository dogfoods Agentic SDLC. Release pull requests update both the plugin manifest and the repository's applied version; only the owner may merge, and the matching stable release is then published automatically.
