@@ -9,4 +9,6 @@ The repository migration first reports a dry run. It updates only fully managed 
 
 Existing sessions are not renamed automatically. New session policies apply prospectively unless the user explicitly requests a rename audit.
 
+This repository dogfoods its own releases. A release pull request must bump both the plugin manifest and repository configuration to the same version. CI accepts that explicit release-candidate state; after the owner merges it, release automation publishes the matching stable tag. Automation never receives pull-request approval or merge authority.
+
 For local plugin development, update the local plugin source, refresh its cache-busting build metadata with the Codex plugin creator workflow, reinstall with `codex plugin add agentic-sdlc@<marketplace-name>`, and start a new session.
