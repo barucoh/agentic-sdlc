@@ -36,6 +36,8 @@ for skill in skills:
 required_files = [
     ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/AGENTS.md",
     ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/docs/decisions/INDEX.md",
+    ROOT / "docs/installation.md",
+    ROOT / "docs/upgrading.md",
 ]
 for path in required_files:
     if not path.is_file():

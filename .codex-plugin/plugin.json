@@ -17,6 +17,10 @@
     "developerName": "barucoh",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
-    "defaultPrompt": "Bootstrap Agentic SDLC in this repository and explain the proposed changes before applying them."
+    "defaultPrompt": [
+      "Bootstrap Agentic SDLC in this repository.",
+      "Upgrade this repository to the installed Agentic SDLC release.",
+      "Retrieve relevant ADR context for this issue."
+    ]
   }
 }

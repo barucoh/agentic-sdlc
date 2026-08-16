@@ -6,7 +6,7 @@ Agentic SDLC installs reusable workflows while keeping project knowledge in the 
 
 ## Install during development
 
-Clone this repository, add it as a local or Git-backed plugin marketplace source, install `agentic-sdlc`, and start a new Codex session. Public-directory distribution will be added after the package has been validated through the OpenAI submission process.
+See [installation](docs/installation.md) for local and version-pinned Git-backed marketplace examples. Public-directory distribution will be added after the package has been validated through the OpenAI submission process.
 
 ## Use
 
@@ -15,6 +15,8 @@ Clone this repository, add it as a local or Git-backed plugin marketplace source
 - Invoke `upgrade-agentic-sdlc` after installing a newer plugin release.
 
 Bootstrap and upgrade always inspect first, report a dry run, preserve local customizations, and require explicit approval before repository writes.
+
+See [upgrading](docs/upgrading.md) for the two-layer plugin and repository migration model.
 
 ## Development
 
