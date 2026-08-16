@@ -1,0 +1,22 @@
+{
+  "name": "agentic-sdlc",
+  "version": "0.1.0",
+  "description": "Install a repository-native, issue-driven software delivery lifecycle for Codex.",
+  "author": {
+    "name": "barucoh",
+    "url": "https://github.com/barucoh"
+  },
+  "homepage": "https://github.com/barucoh/agentic-sdlc",
+  "repository": "https://github.com/barucoh/agentic-sdlc",
+  "keywords": ["codex", "sdlc", "agents", "adr", "github"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agentic SDLC",
+    "shortDescription": "Issue-driven delivery with specialized Codex roles.",
+    "longDescription": "Bootstrap and evolve a repository-native Agentic SDLC with role contracts, selective ADR context, safe upgrades, pull request verification, and explicit human merge control.",
+    "developerName": "barucoh",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": "Bootstrap Agentic SDLC in this repository and explain the proposed changes before applying them."
+  }
+}

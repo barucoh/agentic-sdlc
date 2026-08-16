@@ -1,0 +1,28 @@
+[agents.coordinator]
+description = "Own issue intake, sequencing, task creation, structured handoffs, and final readiness."
+config_file = "agents/coordinator.toml"
+
+[agents.product]
+description = "Clarify user value, behavior, boundaries, and acceptance criteria."
+config_file = "agents/product.toml"
+
+[agents.architecture]
+description = "Always route through the ADR index."
+config_file = "agents/architecture.toml"
+
+[agents.implementation]
+description = "Implement only the assigned issue."
+config_file = "agents/implementation.toml"
+
+[agents.qa]
+description = "Verify acceptance criteria, regressions, relevant ADR constraints, and runnable behavior."
+config_file = "agents/qa.toml"
+
+[agents.reviewer]
+description = "Independently review the issue, diff, ADR constraints, security boundaries, and verification evidence."
+config_file = "agents/reviewer.toml"
+
+[agents.knowledge_steward]
+description = "Maintain durable project knowledge."
+config_file = "agents/knowledge_steward.toml"
+
