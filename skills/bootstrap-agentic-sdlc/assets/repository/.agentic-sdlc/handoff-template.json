@@ -12,6 +12,7 @@
     "commit_sha": null
   },
   "objective": "State the one outcome this handoff requests.",
+  "watchdog_seconds": 25,
   "inputs": ["Authoritative issue and prior accepted handoffs"],
   "constraints": ["Repository policy and human merge authority"],
   "adrs": ["No relevant ADRs"],

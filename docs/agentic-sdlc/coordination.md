@@ -15,8 +15,8 @@ Any file-producing, durable-artifact-producing, decision-heavy, release, high-im
 3. Track state independently per target. Never let one target acknowledgement complete or fail another target.
 4. Send the optional message with a bounded 20–30 second watchdog; the configured default is 25 seconds.
 5. Acknowledgement completes transport only after the authoritative state is confirmed.
-6. Explicit authoritative non-delivery may be reported as not delivered. Timeout, handler failure, or delivered-but-acknowledgement-failed yields `DELIVERY_UNKNOWN`, never `FAILED`.
-7. Before retrying any side effect, reconcile the exact operation ID against the target task and authoritative GitHub state. If already applied, record success without repeating it. If confirmed absent, retry with the same operation ID. If reconciliation is unavailable or ambiguous, stop and surface `DELIVERY_UNKNOWN`.
+6. Explicit authoritative non-delivery may be reported as not delivered only before uncertainty exists. Timeout, handler failure, or delivered-but-acknowledgement-failed yields `DELIVERY_UNKNOWN`, never `FAILED`; a later transport observation cannot make that operation retryable.
+7. Before retrying any side effect, record reconciliation of the exact operation ID against the target task and authoritative GitHub state. Only a recorded `ABSENT` result may transition `DELIVERY_UNKNOWN` to retryable `NOT_DELIVERED`. If already applied, record terminal success without repeating it. A delivered or applied operation is immutable and cannot be reopened. If reconciliation is unavailable or ambiguous, stop and preserve `DELIVERY_UNKNOWN`.
 8. Preserve the per-target operation record and provide a copy/paste fallback containing repository, issue/PR URL, operation ID, objective, expected output, evidence, and next owner. The fallback must be reconstructible from GitHub without a thread ID.
 
 Duplicate operation IDs are idempotency keys. A target must not perform the same side effect twice.

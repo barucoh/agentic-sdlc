@@ -13,7 +13,7 @@ description: Coordinate Agentic SDLC role work, durable issue-backed sessions, s
 4. Create a UUID operation ID and a handoff conforming to `.agentic-sdlc/handoff.schema.json` for every cross-task action.
 5. Persist the requested outcome in an authoritative GitHub issue, PR, review comment, commit, ADR, or canonical document. A message is only an optional wake-up optimization.
 6. Send any optional wake-up with a 20–30 second watchdog, defaulting to the configured 25 seconds, and retain independent state per target.
-7. Treat timeout, handler failure, and delivered-but-acknowledgement-failed as `DELIVERY_UNKNOWN`, not failure. Reconcile the exact operation ID against the target task and GitHub before retrying. Retry only when confirmed absent; if reconciliation is unavailable, stop and surface uncertainty.
+7. Treat timeout, handler failure, and delivered-but-acknowledgement-failed as `DELIVERY_UNKNOWN`, not failure. A later transport observation cannot make it retryable. Record reconciliation of the exact operation ID against the target task and GitHub before retrying; only recorded `ABSENT` permits retry. Delivered or applied operations are terminal and cannot be reopened or repeated. If reconciliation is unavailable, preserve uncertainty and stop.
 8. Provide a GitHub-reconstructible copy/paste fallback containing operation ID, issue or PR URL, objective, expected output, evidence, and next owner. Never persist thread IDs.
 9. Send QA or Reviewer corrections back to the same Implementation task. Require a finding-to-fix verification map, then repeat independent verification. Implementation cannot approve itself.
 

@@ -6,40 +6,43 @@ not persist transport state or perform external side effects.
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
-from uuid import UUID
+from urllib.parse import urlparse
 
 
-ROLES = {
-    "coordinator",
-    "product",
-    "architecture",
-    "implementation",
-    "qa",
-    "reviewer",
-    "knowledge_steward",
-    "human_owner",
-}
-TERMINAL_STATES = {"completed", "changes_requested", "blocked"}
-HANDOFF_FIELDS = {
-    "schema_version",
-    "operation_id",
-    "from_role",
-    "to_role",
-    "work_item",
-    "objective",
-    "inputs",
-    "constraints",
-    "adrs",
-    "acceptance_criteria",
-    "outputs",
-    "dependencies",
-    "escalation",
-    "evidence",
-    "residual_risk",
-    "terminal_state",
+SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "skills"
+    / "bootstrap-agentic-sdlc"
+    / "assets"
+    / "repository"
+    / ".agentic-sdlc"
+    / "handoff.schema.json"
+)
+SUPPORTED_SCHEMA_KEYWORDS = {
+    "$schema",
+    "$id",
+    "$defs",
+    "$ref",
+    "title",
+    "type",
+    "additionalProperties",
+    "required",
+    "properties",
+    "const",
+    "enum",
+    "pattern",
+    "format",
+    "minLength",
+    "minimum",
+    "maximum",
+    "items",
+    "uniqueItems",
 }
 
 
@@ -77,13 +80,20 @@ class TargetOperation:
     attempt_count: int = 0
     retry_allowed: bool = False
     side_effect_confirmed: bool = False
+    reconciliation_count: int = 0
+    last_reconciliation: Reconciliation | None = None
 
     def observe(self, observation: Observation, authoritative_confirmed: bool = False) -> DeliveryState:
+        if self.state is DeliveryState.DELIVERED or self.side_effect_confirmed:
+            return DeliveryState.DELIVERED
         self.attempt_count += 1
         self.retry_allowed = False
         if observation is Observation.EXPLICIT_NON_DELIVERY:
-            self.state = DeliveryState.NOT_DELIVERED
-            self.retry_allowed = True
+            if self.state is DeliveryState.DELIVERY_UNKNOWN:
+                self.state = DeliveryState.DELIVERY_UNKNOWN
+            else:
+                self.state = DeliveryState.NOT_DELIVERED
+                self.retry_allowed = True
         elif observation is Observation.DELIVERED_AND_ACKNOWLEDGED and authoritative_confirmed:
             self.state = DeliveryState.DELIVERED
             self.side_effect_confirmed = True
@@ -92,6 +102,10 @@ class TargetOperation:
         return self.state
 
     def reconcile(self, result: Reconciliation) -> DeliveryState:
+        if self.state is DeliveryState.DELIVERED or self.side_effect_confirmed:
+            return DeliveryState.DELIVERED
+        self.reconciliation_count += 1
+        self.last_reconciliation = result
         self.retry_allowed = False
         if result is Reconciliation.APPLIED:
             self.state = DeliveryState.DELIVERED
@@ -123,7 +137,10 @@ class OperationLedger:
         self._operations: dict[str, TargetOperation] = {}
 
     def register(self, operation: TargetOperation) -> TargetOperation:
-        UUID(operation.operation_id)
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        operation_pattern = schema["properties"]["operation_id"]["pattern"]
+        if re.fullmatch(operation_pattern, operation.operation_id) is None:
+            raise ValueError("operation ID does not conform to the handoff schema")
         existing = self._operations.get(operation.operation_id)
         if existing:
             identity = ("target", "authoritative_ref", "objective", "expected_output", "next_owner")
@@ -137,38 +154,106 @@ class OperationLedger:
         return self._operations[operation_id]
 
 
-def validate_handoff(value: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    missing = HANDOFF_FIELDS - value.keys()
-    extra = value.keys() - HANDOFF_FIELDS
-    if missing:
-        errors.append(f"missing fields: {', '.join(sorted(missing))}")
-    if extra:
-        errors.append(f"unexpected fields: {', '.join(sorted(extra))}")
-    if value.get("schema_version") != "1.0.0":
-        errors.append("schema_version must be 1.0.0")
-    try:
-        UUID(str(value.get("operation_id", "")))
-    except ValueError:
-        errors.append("operation_id must be a UUID")
-    if value.get("from_role") not in ROLES or value.get("to_role") not in ROLES:
-        errors.append("from_role and to_role must be known roles")
-    if value.get("terminal_state") not in TERMINAL_STATES:
-        errors.append("invalid terminal_state")
-    for field in (
-        "inputs",
-        "constraints",
-        "adrs",
-        "acceptance_criteria",
-        "outputs",
-        "dependencies",
-        "escalation",
-        "evidence",
-        "residual_risk",
-    ):
-        if not isinstance(value.get(field), list) or any(not isinstance(item, str) or not item for item in value.get(field, [])):
-            errors.append(f"{field} must be a list of non-empty strings")
-    work_item = value.get("work_item")
-    if not isinstance(work_item, dict) or not {"repository", "issue_number", "issue_url", "title"}.issubset(work_item):
-        errors.append("work_item must identify the authoritative issue")
+def _resolve_ref(root: dict[str, Any], ref: str) -> dict[str, Any]:
+    if not ref.startswith("#/"):
+        raise ValueError(f"unsupported schema reference: {ref}")
+    node: Any = root
+    for part in ref[2:].split("/"):
+        node = node[part.replace("~1", "/").replace("~0", "~")]
+    if not isinstance(node, dict):
+        raise ValueError(f"schema reference is not an object: {ref}")
+    return node
+
+
+def _schema_support_errors(schema: dict[str, Any], path: str = "schema") -> list[str]:
+    errors = [f"{path} uses unsupported keyword {key}" for key in schema if key not in SUPPORTED_SCHEMA_KEYWORDS]
+    if "format" in schema and schema["format"] != "uri":
+        errors.append(f"{path} uses unsupported format {schema['format']!r}")
+    if "additionalProperties" in schema and schema["additionalProperties"] is not False:
+        errors.append(f"{path} uses unsupported additionalProperties value")
+    for collection in ("properties", "$defs"):
+        for name, child in schema.get(collection, {}).items():
+            if isinstance(child, dict):
+                errors.extend(_schema_support_errors(child, f"{path}.{collection}.{name}"))
+    if isinstance(schema.get("items"), dict):
+        errors.extend(_schema_support_errors(schema["items"], f"{path}.items"))
     return errors
+
+
+def _matches_type(value: Any, expected: str) -> bool:
+    return {
+        "object": isinstance(value, dict),
+        "array": isinstance(value, list),
+        "string": isinstance(value, str),
+        "integer": isinstance(value, int) and not isinstance(value, bool),
+        "null": value is None,
+    }.get(expected, False)
+
+
+def _valid_uri(value: str) -> bool:
+    parsed = urlparse(value)
+    return bool(parsed.scheme and (parsed.netloc or parsed.scheme not in {"http", "https"}))
+
+
+def _validate_schema(
+    value: Any,
+    schema: dict[str, Any],
+    root: dict[str, Any],
+    path: str,
+) -> list[str]:
+    if "$ref" in schema:
+        return _validate_schema(value, _resolve_ref(root, schema["$ref"]), root, path)
+
+    errors: list[str] = []
+    expected_types = schema.get("type")
+    if expected_types is not None:
+        choices = [expected_types] if isinstance(expected_types, str) else expected_types
+        if not any(_matches_type(value, expected) for expected in choices):
+            return [f"{path} must have type {' or '.join(choices)}"]
+
+    if "const" in schema and value != schema["const"]:
+        errors.append(f"{path} must equal {schema['const']!r}")
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{path} must be one of {schema['enum']!r}")
+
+    if isinstance(value, dict):
+        properties = schema.get("properties", {})
+        for required in schema.get("required", []):
+            if required not in value:
+                errors.append(f"{path}.{required} is required")
+        if schema.get("additionalProperties") is False:
+            for key in sorted(value.keys() - properties.keys()):
+                errors.append(f"{path}.{key} is not allowed")
+        for key, child in properties.items():
+            if key in value:
+                errors.extend(_validate_schema(value[key], child, root, f"{path}.{key}"))
+
+    if isinstance(value, list):
+        if schema.get("uniqueItems"):
+            encoded = [json.dumps(item, sort_keys=True, separators=(",", ":")) for item in value]
+            if len(encoded) != len(set(encoded)):
+                errors.append(f"{path} must contain unique items")
+        if "items" in schema:
+            for index, item in enumerate(value):
+                errors.extend(_validate_schema(item, schema["items"], root, f"{path}[{index}]"))
+
+    if isinstance(value, str):
+        if len(value) < schema.get("minLength", 0):
+            errors.append(f"{path} is shorter than {schema['minLength']}")
+        if "pattern" in schema and re.search(schema["pattern"], value) is None:
+            errors.append(f"{path} does not match {schema['pattern']}")
+        if schema.get("format") == "uri" and not _valid_uri(value):
+            errors.append(f"{path} must be an absolute URI")
+
+    if isinstance(value, int) and not isinstance(value, bool):
+        if "minimum" in schema and value < schema["minimum"]:
+            errors.append(f"{path} must be at least {schema['minimum']}")
+        if "maximum" in schema and value > schema["maximum"]:
+            errors.append(f"{path} must be at most {schema['maximum']}")
+    return errors
+
+
+def validate_handoff(value: Any, schema: dict[str, Any] | None = None) -> list[str]:
+    authoritative_schema = schema or json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    compatibility_errors = _schema_support_errors(authoritative_schema)
+    return compatibility_errors or _validate_schema(value, authoritative_schema, authoritative_schema, "handoff")

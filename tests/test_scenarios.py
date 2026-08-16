@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 import tomllib
 import unittest
@@ -78,13 +79,47 @@ class RoleContractTests(unittest.TestCase):
 
 
 class HandoffAndCoordinationTests(unittest.TestCase):
-    def test_versioned_handoff_template_is_valid(self) -> None:
-        template = json.loads(
+    def handoff(self) -> dict:
+        return json.loads(
             (ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/handoff-template.json").read_text(
                 encoding="utf-8"
             )
         )
-        self.assertEqual(validate_handoff(template), [])
+
+    def test_versioned_handoff_template_is_valid(self) -> None:
+        self.assertEqual(validate_handoff(self.handoff()), [])
+
+    def test_executable_handoff_validation_enforces_every_schema_constraint(self) -> None:
+        mutations = {
+            "root type": lambda value: [],
+            "missing required": lambda value: value.pop("objective"),
+            "empty required string": lambda value: value.__setitem__("objective", ""),
+            "watchdog below minimum": lambda value: value.__setitem__("watchdog_seconds", 0),
+            "watchdog above maximum": lambda value: value.__setitem__("watchdog_seconds", 31),
+            "watchdog boolean is not integer": lambda value: value.__setitem__("watchdog_seconds", True),
+            "unexpected extra property": lambda value: value.__setitem__("unexpected", True),
+            "duplicate unique-list entries": lambda value: value["inputs"].append(value["inputs"][0]),
+            "empty list item": lambda value: value["constraints"].append(""),
+            "list type": lambda value: value.__setitem__("outputs", "not-a-list"),
+            "schema const": lambda value: value.__setitem__("schema_version", "2.0.0"),
+            "operation pattern": lambda value: value.__setitem__("operation_id", "00000000-0000-7000-8000-000000000000"),
+            "role enum": lambda value: value.__setitem__("to_role", "scribe"),
+            "terminal enum": lambda value: value.__setitem__("terminal_state", "DELIVERY_UNKNOWN"),
+            "work item extra": lambda value: value["work_item"].__setitem__("thread_id", "local-only"),
+            "repository pattern": lambda value: value["work_item"].__setitem__("repository", "owner/repo/extra"),
+            "issue minimum": lambda value: value["work_item"].__setitem__("issue_number", 0),
+            "issue boolean is not integer": lambda value: value["work_item"].__setitem__("issue_number", True),
+            "issue URI": lambda value: value["work_item"].__setitem__("issue_url", "not-a-uri"),
+            "empty work item title": lambda value: value["work_item"].__setitem__("title", ""),
+            "pull request URI": lambda value: value["work_item"].__setitem__("pull_request_url", "relative/path"),
+            "commit SHA": lambda value: value["work_item"].__setitem__("commit_sha", "abc123"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                value = self.handoff()
+                mutated = mutate(value)
+                candidate = mutated if name == "root type" else value
+                self.assertTrue(validate_handoff(candidate), f"mutation accepted: {name}")
 
     def operation(self, target: str = "task-a") -> TargetOperation:
         return TargetOperation(str(uuid4()), target, "https://github.com/o/r/issues/1", "Apply finding F-1")
@@ -109,6 +144,46 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             self.assertEqual(operation.observe(observation), DeliveryState.DELIVERY_UNKNOWN)
             self.assertFalse(operation.retry_allowed)
 
+    def test_unknown_requires_recorded_absent_reconciliation_before_retry(self) -> None:
+        operation = self.operation()
+        operation.observe(Observation.TIMEOUT)
+        self.assertEqual(operation.observe(Observation.EXPLICIT_NON_DELIVERY), DeliveryState.DELIVERY_UNKNOWN)
+        self.assertFalse(operation.retry_allowed)
+        self.assertEqual(operation.reconciliation_count, 0)
+        self.assertIsNone(operation.last_reconciliation)
+
+        self.assertEqual(operation.reconcile(Reconciliation.UNAVAILABLE), DeliveryState.DELIVERY_UNKNOWN)
+        self.assertFalse(operation.retry_allowed)
+        self.assertEqual(operation.reconciliation_count, 1)
+        self.assertEqual(operation.last_reconciliation, Reconciliation.UNAVAILABLE)
+
+        self.assertEqual(operation.reconcile(Reconciliation.ABSENT), DeliveryState.NOT_DELIVERED)
+        self.assertTrue(operation.retry_allowed)
+        self.assertEqual(operation.reconciliation_count, 2)
+        self.assertEqual(operation.last_reconciliation, Reconciliation.ABSENT)
+
+    def test_delivered_operation_is_terminal_and_cannot_be_reopened(self) -> None:
+        delivered = self.operation()
+        delivered.observe(Observation.DELIVERED_AND_ACKNOWLEDGED, authoritative_confirmed=True)
+        applied = self.operation()
+        applied.observe(Observation.TIMEOUT)
+        applied.reconcile(Reconciliation.APPLIED)
+        for operation in (delivered, applied):
+            with self.subTest(origin=operation.last_reconciliation or "acknowledgement"):
+                attempts = operation.attempt_count
+                reconciliations = operation.reconciliation_count
+                for transition in (
+                    lambda: operation.observe(Observation.TIMEOUT),
+                    lambda: operation.observe(Observation.EXPLICIT_NON_DELIVERY),
+                    lambda: operation.reconcile(Reconciliation.ABSENT),
+                    lambda: operation.reconcile(Reconciliation.UNAVAILABLE),
+                ):
+                    self.assertEqual(transition(), DeliveryState.DELIVERED)
+                    self.assertTrue(operation.side_effect_confirmed)
+                    self.assertFalse(operation.retry_allowed)
+                    self.assertEqual(operation.attempt_count, attempts)
+                    self.assertEqual(operation.reconciliation_count, reconciliations)
+
     def test_reconciliation_prevents_duplicates_and_stops_when_unavailable(self) -> None:
         operation = self.operation()
         operation.observe(Observation.TIMEOUT)
@@ -130,6 +205,10 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         second.observe(Observation.DELIVERED_AND_ACKNOWLEDGED, authoritative_confirmed=True)
         self.assertEqual(first.state, DeliveryState.NOT_DELIVERED)
         self.assertEqual(second.state, DeliveryState.DELIVERED)
+        duplicate = ledger.register(TargetOperation(second.operation_id, "task-b", second.authoritative_ref, second.objective))
+        duplicate.observe(Observation.EXPLICIT_NON_DELIVERY)
+        self.assertEqual(duplicate.state, DeliveryState.DELIVERED)
+        self.assertEqual(second.attempt_count, 1)
 
     def test_github_recovery_fallback_contains_no_thread_id(self) -> None:
         fallback = self.operation().fallback()
@@ -196,6 +275,43 @@ class RepositoryStateTests(unittest.TestCase):
         role.write_text(role.read_text(encoding="utf-8") + "\n# local edit\n", encoding="utf-8")
         actions, _, _ = manage_repository.plan(target, "Customized Fixture")
         self.assertIn(("conflict", ".codex/agents/product.toml"), {(a.classification, a.path.as_posix()) for a in actions})
+
+    def assert_check_conflict(self, target: Path, reason_fragment: str) -> None:
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/manage_repository.py"), "check", "--target", str(target)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("conflict: .agentic-sdlc/managed.json", result.stdout)
+        self.assertIn(reason_fragment, result.stdout)
+
+    def test_manifest_plugin_version_drift_is_a_conflict(self) -> None:
+        target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
+        manifest_path = target / ".agentic-sdlc/managed.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["plugin_version"] = "99.0.0"
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self.assert_check_conflict(target, "plugin_version")
+
+    def test_manifest_false_managed_file_hash_is_a_conflict(self) -> None:
+        target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
+        manifest_path = target / ".agentic-sdlc/managed.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["files"][".codex/agents/product.toml"] = "0" * 64
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self.assert_check_conflict(target, "hash does not match .codex/agents/product.toml")
+
+    def test_missing_manifest_is_reported_as_drift(self) -> None:
+        target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
+        (target / ".agentic-sdlc/managed.json").unlink()
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/manage_repository.py"), "check", "--target", str(target)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("create: .agentic-sdlc/managed.json", result.stdout)
 
 
 if __name__ == "__main__":

@@ -110,7 +110,7 @@ template_path = template_root / ".agentic-sdlc/handoff-template.json"
 try:
     handoff_schema = json.loads(schema_path.read_text(encoding="utf-8"))
     handoff_template = json.loads(template_path.read_text(encoding="utf-8"))
-    errors.extend(f"invalid handoff template: {error}" for error in validate_handoff(handoff_template))
+    errors.extend(f"invalid handoff template: {error}" for error in validate_handoff(handoff_template, handoff_schema))
     terminal_enum = handoff_schema["properties"]["terminal_state"]["enum"]
     if terminal_enum != ["completed", "changes_requested", "blocked"]:
         errors.append("handoff terminal states must be completed, changes_requested, and blocked")

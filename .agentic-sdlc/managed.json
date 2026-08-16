@@ -1,8 +1,8 @@
 {
   "files": {
     ".agentic-sdlc/config.yaml": "61daa4939baf274bdb3e5542b3adad225e6c5084ae73e19227da08d3b2b35bd5",
-    ".agentic-sdlc/handoff-template.json": "7bc48f3b3f971411b2787628887e885ab2ab4cce2239017fbe01233ab49383fe",
-    ".agentic-sdlc/handoff.schema.json": "a5e8d2a0c7ae28ee34cb69a7fd09d2f6da6ab91ac0d63f1ba407bd6acca76fb5",
+    ".agentic-sdlc/handoff-template.json": "876b5b8794aab61c30123c95cb47cd73beb6428079f4f5648cb38afafb78a334",
+    ".agentic-sdlc/handoff.schema.json": "56a0e5bb02fe1651988472c6ca9c7f975c61379659037c1a54672993ba7d20a3",
     ".codex/agents/architecture.toml": "c6765666b60c7087941716c4d198fb2ac2264ffef3bc65a659066ff25c3d821c",
     ".codex/agents/coordinator.toml": "ce58ed2d3da962d35c7265670cb498b36c2e30e14a51ae1f92ecadb77d7c4329",
     ".codex/agents/implementation.toml": "704aa98911df091f86851cc5a59fd8111f34f31bf7af339ed1348cb5669c853e",
@@ -10,7 +10,7 @@
     ".codex/agents/product.toml": "ac1103e28d340fa6d7593ab5fb4918a2b13ddd610e71bb54df5721bece5994dc",
     ".codex/agents/qa.toml": "3e77df88d6bcd2d4b110db9333a10ffbf1d7ce354f9d129208efaca4476f44f0",
     ".codex/agents/reviewer.toml": "17f1ae8d61d82f7b9142e46f1882c6d8296c82e8ca1d8fe84c3ebbf43df8ecba",
-    "docs/agentic-sdlc/coordination.md": "d6becbda8c2ba8816f785427f76c128d2f327752f81fc71d6c1585e261e05817",
+    "docs/agentic-sdlc/coordination.md": "c94b3375cca94642c183faec1049d3fe4c309ff492db3bcbebef89faa9dfd1a4",
     "docs/agentic-sdlc/role-contracts.md": "79e85d24def6d039edd5f72192adeb7ce0953e3260663f77da737ad49faea9c2"
   },
   "managed_blocks": {
