@@ -428,6 +428,7 @@ class CoordinatorLifecycle:
         self.reviewer_key = f"issue-{self.issue_number}-reviewer"
         self._artifact: tuple[str, str, str] | None = None
         self._artifact_revisions: list[tuple[str, str, str]] = []
+        self._correction_checkpoint: int | None = None
         self._operations: dict[str, dict[str, Any]] = {}
         self._unknown: str | None = None
 
@@ -479,6 +480,9 @@ class CoordinatorLifecycle:
     def _bound_ready_evidence(self, evidence: dict[str, Any] | None) -> bool:
         return bool(self._artifact and self._ready_evidence(evidence, {**self.work_item.as_dict(), "pull_request_url": self._artifact[0], "commit_sha": self._artifact[1]}))
 
+    def _correction_revision_ready(self, next_state: LifecycleState) -> bool:
+        return not (next_state is LifecycleState.IMPLEMENTATION_READY and self.state is LifecycleState.CORRECTION_ACTIVE and (self._correction_checkpoint is None or len(self._artifact_revisions) <= self._correction_checkpoint))
+
     def transition(
         self,
         actor: str,
@@ -512,6 +516,8 @@ class CoordinatorLifecycle:
         intent = json.dumps({"state": self.state.value, "next": next_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback}, sort_keys=True, separators=(",", ":"))
         if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._bound_ready_evidence(evidence):
             raise LifecycleTransitionError("lifecycle transition requires canonical passed readiness evidence")
+        if not self._correction_revision_ready(next_state):
+            raise LifecycleTransitionError("correction readiness requires a later artifact revision")
         prior = self._operations.get(operation_id)
         if prior is not None:
             if prior["intent"] != intent:
@@ -530,6 +536,8 @@ class CoordinatorLifecycle:
         if next_state is LifecycleState.REVIEW_ACTIVE and self.state is not LifecycleState.IMPLEMENTATION_READY:
             raise LifecycleTransitionError("Reviewer activates only from IMPLEMENTATION_READY")
         self._operations[operation_id] = {"intent": intent, "state": next_state, "retryable": False, "terminal": next_state is LifecycleState.HUMAN_MERGE_READY}
+        if next_state is LifecycleState.CORRECTION_ACTIVE:
+            self._correction_checkpoint = len(self._artifact_revisions)
         self.state = next_state
         return self.state
 
@@ -542,6 +550,8 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError(f"cannot observe transport from {self.state.value}")
         if intended_state not in self._TRANSITIONS.get(self.state, set()) and intended_state is not LifecycleState.BLOCKED:
             raise LifecycleTransitionError("unknown transport target is not a valid next lifecycle state")
+        if not self._correction_revision_ready(intended_state):
+            raise LifecycleTransitionError("correction readiness requires a later artifact revision")
         if operation_id in self._operations:
             raise LifecycleTransitionError("operation ID cannot be overwritten while delivery is unknown")
         if intended_state is LifecycleState.BLOCKED:
@@ -576,6 +586,8 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError("APPLIED reconciliation has an unauthorized recorded direction")
         if applied and intended_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._bound_ready_evidence(stored["evidence"]):
             raise LifecycleTransitionError("APPLIED reconciliation requires valid readiness evidence")
+        if applied and not self._correction_revision_ready(intended_state):
+            raise LifecycleTransitionError("APPLIED reconciliation requires a later correction artifact revision")
         self.state = intended_state if applied else resume_state
         self._unknown = None
         record["retryable"] = not applied

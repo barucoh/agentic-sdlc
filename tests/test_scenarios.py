@@ -293,6 +293,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             self.assertEqual(lifecycle.transition("coordinator", next_state, str(uuid4()), evidence), next_state)
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.CHANGES_REQUESTED, str(uuid4())), LifecycleState.CHANGES_REQUESTED)
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.CORRECTION_ACTIVE, str(uuid4())), LifecycleState.CORRECTION_ACTIVE)
+        evidence = {**evidence, "commit_sha": "b" * 40}
+        lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence), LifecycleState.IMPLEMENTATION_READY)
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, str(uuid4()), evidence), LifecycleState.REVIEW_ACTIVE)
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACCEPTED, str(uuid4())), LifecycleState.REVIEW_ACCEPTED)
