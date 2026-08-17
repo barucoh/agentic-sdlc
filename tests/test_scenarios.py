@@ -186,9 +186,20 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         op = str(uuid4())
         lifecycle.observe_delivery_unknown("coordinator", op, LifecycleState.IMPLEMENTATION_READY, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-coordinator")
         self.assertEqual(lifecycle.reconcile_delivery("coordinator", op, True), LifecycleState.IMPLEMENTATION_READY)
-        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, op, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-coordinator"), LifecycleState.IMPLEMENTATION_READY)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, op, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-coordinator")
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, op, {**evidence, "commit_sha": "f" * 40}, source_task_key="issue-5-coordinator", target_task_key="issue-5-reviewer")
+
+    def test_cycle5_handoff_tuple_binding_and_blocked_fallback(self) -> None:
+        ready = self.handoff()
+        ready.update({"lifecycle_state": "REVIEW_ACTIVE", "from_role": "implementation", "to_role": "reviewer", "source_task_key": "issue-1-implementation", "target_task_key": "issue-1-reviewer", "target_model": "gpt-5.6-sol", "effort": "Medium", "sandbox_mode": "read-only", "work_item": {**ready["work_item"], "pull_request_url": "https://github.com/o/r/pull/6", "commit_sha": "a" * 40}, "readiness_evidence": {"commit_sha": "b" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}})
+        self.assertTrue(validate_handoff(ready))
+        blocked = self.handoff()
+        blocked["lifecycle_state"] = "BLOCKED"
+        self.assertTrue(validate_handoff(blocked))
+        blocked["blocked_fallback"] = {"repository": "o/r", "issue_url": "https://github.com/o/r/issues/1", "operation_id": str(uuid4()), "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
+        self.assertEqual(validate_handoff(blocked), [])
 
     def test_routing_requires_explicit_model_effort_and_one_sentence_rationale(self) -> None:
         for field in ("target_model", "effort", "rationale"):
@@ -276,7 +287,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
         operation_id = str(uuid4())
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, operation_id, evidence), LifecycleState.REVIEW_ACTIVE)
-        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, operation_id, evidence), LifecycleState.REVIEW_ACTIVE)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, operation_id, evidence)
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("coordinator", LifecycleState.REVIEW_ACCEPTED, operation_id)
 
@@ -300,6 +312,13 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         ready.update(
             {
                 "lifecycle_state": "IMPLEMENTATION_READY",
+                "from_role": "implementation",
+                "to_role": "coordinator",
+                "source_task_key": "issue-1-implementation",
+                "target_task_key": "issue-1-coordinator",
+                "target_model": "gpt-5.6-sol",
+                "effort": "Medium",
+                "sandbox_mode": "read-only",
                 "evidence": ["local gates passed", "CI passed"],
                 "readiness_evidence": {"commit_sha": "c" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]},
                 "work_item": {
@@ -307,7 +326,6 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                     "pull_request_url": "https://github.com/o/r/pull/6",
                     "commit_sha": "c" * 40,
                 },
-                "readiness_evidence": {"commit_sha": "d" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]},
             }
         )
         self.assertEqual(validate_handoff(ready), [])
