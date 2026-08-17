@@ -423,6 +423,8 @@ class CoordinatorLifecycle:
         self.coordinator_key = f"issue-{self.issue_number}-coordinator"
         self.implementation_key = f"issue-{self.issue_number}-implementation"
         self.reviewer_key = f"issue-{self.issue_number}-reviewer"
+        self._artifact: tuple[str, str, str] | None = None
+        self._binding_operation: str | None = None
         self._operations: dict[str, dict[str, Any]] = {}
         self._unknown: str | None = None
 
@@ -437,6 +439,23 @@ class CoordinatorLifecycle:
     def _direction(self, current: LifecycleState, nxt: LifecycleState, source: str, target: str, event: str | None = None) -> bool:
         allowed = lifecycle_tuple(self.issue_number, current, nxt, event)
         return bool(allowed and allowed[2:] == (source, target))
+
+    def bind_delivery_artifact(self, operation_id: str, pull_request_url: str | None, commit_sha: str | None) -> None:
+        """Atomically and immutably bind the PR/SHA authority for readiness."""
+        if not self._valid_operation(operation_id) or not isinstance(pull_request_url, str) or not isinstance(commit_sha, str):
+            raise LifecycleTransitionError("artifact binding requires a UUID, exact PR URL, and exact SHA")
+        if not re.fullmatch(r"https://github\.com/" + re.escape(self.work_item.repository) + r"/pull/[1-9][0-9]*", pull_request_url) or not re.fullmatch(r"[0-9a-f]{40}", commit_sha):
+            raise LifecycleTransitionError("artifact binding must match the canonical repository")
+        proposed = (operation_id, pull_request_url, commit_sha)
+        if self._artifact is not None:
+            if proposed == (self._binding_operation, self._artifact[0], self._artifact[1]):
+                return
+            raise LifecycleTransitionError("delivery artifact is already immutably bound")
+        self._binding_operation = operation_id
+        self._artifact = (pull_request_url, commit_sha, operation_id)
+
+    def _bound_ready_evidence(self, evidence: dict[str, Any] | None) -> bool:
+        return bool(self._artifact and self._ready_evidence(evidence, {**self.work_item.as_dict(), "pull_request_url": self._artifact[0], "commit_sha": self._artifact[1]}))
 
     def transition(
         self,
@@ -469,7 +488,7 @@ class CoordinatorLifecycle:
         if not self._direction(self.state, next_state, source_task_key, target_task_key, event):
             raise LifecycleTransitionError("unauthorized lifecycle event direction")
         intent = json.dumps({"state": self.state.value, "next": next_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback}, sort_keys=True, separators=(",", ":"))
-        if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(evidence, self.work_item.as_dict()):
+        if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._bound_ready_evidence(evidence):
             raise LifecycleTransitionError("lifecycle transition requires canonical passed readiness evidence")
         prior = self._operations.get(operation_id)
         if prior is not None:
@@ -533,7 +552,7 @@ class CoordinatorLifecycle:
         stored = json.loads(record["intent"])
         if not self._direction(resume_state, intended_state, stored["source"], stored["target"], stored["event"]):
             raise LifecycleTransitionError("APPLIED reconciliation has an unauthorized recorded direction")
-        if applied and intended_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(stored["evidence"], self.work_item.as_dict()):
+        if applied and intended_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._bound_ready_evidence(stored["evidence"]):
             raise LifecycleTransitionError("APPLIED reconciliation requires valid readiness evidence")
         self.state = intended_state if applied else resume_state
         self._unknown = None

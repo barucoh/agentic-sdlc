@@ -190,6 +190,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-reviewer")
         op = str(uuid4())
+        lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
         lifecycle.observe_delivery_unknown("coordinator", op, LifecycleState.IMPLEMENTATION_READY, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-coordinator")
         self.assertEqual(lifecycle.reconcile_delivery("coordinator", op, True), LifecycleState.IMPLEMENTATION_READY)
         with self.assertRaises(LifecycleTransitionError):
@@ -278,6 +279,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             "ci_status": "passed",
             "required_checks": [{"name": "validate", "status": "passed"}],
         }
+        lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
         self.assertEqual(
             lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence),
             LifecycleState.IMPLEMENTATION_READY,
@@ -286,6 +288,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
     def test_lifecycle_sequences_review_correction_and_human_gate(self) -> None:
         lifecycle = self.lifecycle()
         evidence = {"commit_sha": "a" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
+        lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
         for next_state in (LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE):
             self.assertEqual(lifecycle.transition("coordinator", next_state, str(uuid4()), evidence), next_state)
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.CHANGES_REQUESTED, str(uuid4())), LifecycleState.CHANGES_REQUESTED)
@@ -298,6 +301,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
     def test_lifecycle_duplicate_operations_and_unknown_delivery_cannot_blind_activate(self) -> None:
         lifecycle = self.lifecycle()
         evidence = {"commit_sha": "b" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
+        lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
         lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
         operation_id = str(uuid4())
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, operation_id, evidence), LifecycleState.REVIEW_ACTIVE)
@@ -307,6 +311,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             lifecycle.transition("coordinator", LifecycleState.REVIEW_ACCEPTED, operation_id)
 
         lifecycle = self.lifecycle()
+        lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
         lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
         unknown_id = str(uuid4())
         self.assertEqual(lifecycle.observe_delivery_unknown("coordinator", unknown_id, LifecycleState.REVIEW_ACTIVE), LifecycleState.DELIVERY_UNKNOWN)
