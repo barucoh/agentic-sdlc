@@ -430,6 +430,7 @@ class CoordinatorLifecycle:
         self._artifact: tuple[str, str, str] | None = None
         self._artifact_revisions: list[tuple[str, str, str]] = []
         self._correction_checkpoint: int | None = None
+        self._correction_authority: dict[str, int] = {}
         self._operations: dict[str, dict[str, Any]] = {}
         self._unknown: str | None = None
 
@@ -484,13 +485,15 @@ class CoordinatorLifecycle:
     def _correction_revision_ready(self, next_state: LifecycleState) -> bool:
         return not (next_state is LifecycleState.IMPLEMENTATION_READY and self.state is LifecycleState.CORRECTION_ACTIVE and (self._correction_checkpoint is None or len(self._artifact_revisions) <= self._correction_checkpoint))
 
-    def _apply_transition_intent(self, record: dict[str, Any], next_state: LifecycleState) -> LifecycleState:
+    def _apply_transition_intent(self, operation_id: str, record: dict[str, Any], next_state: LifecycleState) -> LifecycleState:
         if record.get("intent_digest") != hashlib.sha256(record["intent"].encode("utf-8")).hexdigest():
             raise LifecycleTransitionError("immutable transition intent integrity check failed")
         intent = json.loads(record["intent"])
         checkpoint = intent.get("correction_checkpoint")
-        if next_state is LifecycleState.CORRECTION_ACTIVE and (not isinstance(checkpoint, int) or checkpoint < 0 or checkpoint > len(self._artifact_revisions)):
-            raise LifecycleTransitionError("correction checkpoint is missing or malformed")
+        if next_state is LifecycleState.CORRECTION_ACTIVE:
+            authority = self._correction_authority.get(operation_id)
+            if not isinstance(checkpoint, int) or authority is None or checkpoint != authority or checkpoint < 0 or checkpoint > len(self._artifact_revisions):
+                raise LifecycleTransitionError("correction checkpoint is missing, malformed, or not authoritative")
         if next_state is LifecycleState.CORRECTION_ACTIVE:
             self._correction_checkpoint = intent["correction_checkpoint"]
         self.state = next_state
@@ -539,7 +542,7 @@ class CoordinatorLifecycle:
             if prior["intent"] != intent:
                 raise LifecycleTransitionError("operation ID cannot be reused for another transition")
             if prior.get("retryable"):
-                return self._apply_transition_intent(prior, next_state)
+                return self._apply_transition_intent(operation_id, prior, next_state)
             if prior.get("terminal"):
                 return self.state
             return self.state
@@ -551,7 +554,9 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError("Reviewer activates only from IMPLEMENTATION_READY")
         record = {"intent": intent, "intent_digest": hashlib.sha256(intent.encode("utf-8")).hexdigest(), "state": self.state, "retryable": False, "terminal": next_state is LifecycleState.HUMAN_MERGE_READY}
         self._operations[operation_id] = record
-        return self._apply_transition_intent(record, next_state)
+        if next_state is LifecycleState.CORRECTION_ACTIVE:
+            self._correction_authority[operation_id] = checkpoint
+        return self._apply_transition_intent(operation_id, record, next_state)
 
     def observe_delivery_unknown(self, actor: str, operation_id: str, intended_state: LifecycleState, evidence: dict[str, Any] | None = None, *, source_task_key: str | None = None, target_task_key: str | None = None, event: str | None = None, fallback: dict[str, Any] | None = None) -> LifecycleState:
         if actor != "coordinator":
@@ -582,6 +587,8 @@ class CoordinatorLifecycle:
         checkpoint = len(self._artifact_revisions) if intended_state is LifecycleState.CORRECTION_ACTIVE else None
         intent = json.dumps({"state": self.state.value, "next": intended_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback, "correction_checkpoint": checkpoint}, sort_keys=True, separators=(",", ":"))
         self._operations[operation_id] = {"intent": intent, "intent_digest": hashlib.sha256(intent.encode("utf-8")).hexdigest(), "state": self.state, "retryable": False, "terminal": False, "intended": intended_state}
+        if intended_state is LifecycleState.CORRECTION_ACTIVE:
+            self._correction_authority[operation_id] = checkpoint
         self._unknown = operation_id
         self.state = LifecycleState.DELIVERY_UNKNOWN
         return self.state
@@ -604,7 +611,7 @@ class CoordinatorLifecycle:
         if applied and not self._correction_revision_ready(intended_state):
             raise LifecycleTransitionError("APPLIED reconciliation requires a later correction artifact revision")
         if applied:
-            self._apply_transition_intent(record, intended_state)
+            self._apply_transition_intent(operation_id, record, intended_state)
         else:
             self.state = resume_state
         self._unknown = None
