@@ -463,6 +463,13 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError("delivery artifact is already immutably bound")
         if self._artifact is None and self.state is not LifecycleState.IMPLEMENTATION_ACTIVE:
             raise LifecycleTransitionError("initial artifact binding is allowed only before implementation readiness")
+        if self._artifact_revisions:
+            original_pr = self._artifact_revisions[0][0]
+            prior_shas = {revision[1] for revision in self._artifact_revisions}
+            if pull_request_url != original_pr:
+                raise LifecycleTransitionError("artifact revisions must retain the original pull request")
+            if commit_sha in prior_shas:
+                raise LifecycleTransitionError("artifact revisions require a new, never-before-used SHA")
         if self.work_item.pull_request_url is not None and (pull_request_url != self.work_item.pull_request_url or commit_sha != self.work_item.commit_sha):
             raise LifecycleTransitionError("binding must exactly match prebound canonical artifact")
         self._artifact = (pull_request_url, commit_sha, operation_id)
