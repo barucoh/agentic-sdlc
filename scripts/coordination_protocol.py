@@ -58,9 +58,9 @@ ROLE_CODES = {
 TARGET_MODELS = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
 EFFORT_LEVELS = ("Low", "Medium", "High")
 ROUTING_MATRIX = {
-    "coordinator": {"gpt-5.6-sol": {"Medium", "High"}},
-    "product": {"gpt-5.6-sol": {"Medium", "High"}},
-    "architecture": {"gpt-5.6-sol": {"Medium", "High"}},
+    "coordinator": {"gpt-5.6-sol": {"Medium"}},
+    "product": {"gpt-5.6-sol": {"Medium"}},
+    "architecture": {"gpt-5.6-sol": {"Medium"}},
     "implementation": {
         "gpt-5.6-luna": {"Low"},
         "gpt-5.6-terra": {"Low", "Medium", "High"},
@@ -85,6 +85,11 @@ ROUTING_CONFIG_LINES = (
     '  reviewer: "gpt-5.6-sol/Medium|High-with-risk-rationale"',
     '  knowledge_steward: "gpt-5.6-luna/Low|gpt-5.6-sol/Medium-with-decision-rationale"',
     '  ephemeral_research: "gpt-5.6-luna/Low|gpt-5.6-terra/Low|gpt-5.6-sol/exceptional-rationale"',
+)
+LIFECYCLE_CONFIG_LINES = (
+    "lifecycle_policy: coordinator-owned-v1",
+    'lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"',
+    "lifecycle_transport_states: BLOCKED, DELIVERY_UNKNOWN",
 )
 
 
@@ -143,6 +148,9 @@ def validate_session_title_config(config_text: str) -> list[str]:
     missing_routing_lines = [line for line in ROUTING_CONFIG_LINES if line not in lines]
     if missing_routing_lines:
         errors.append("routing policy is incomplete: " + ", ".join(missing_routing_lines))
+    missing_lifecycle_lines = [line for line in LIFECYCLE_CONFIG_LINES if line not in lines]
+    if missing_lifecycle_lines:
+        errors.append("lifecycle policy is incomplete: " + ", ".join(missing_lifecycle_lines))
     return errors
 
 
@@ -156,38 +164,39 @@ def validate_routing(value: dict[str, Any]) -> list[str]:
     mode = value.get("execution_mode")
     sandbox = value.get("sandbox_mode")
     rationale = value.get("rationale", "")
-    if target_role not in ROUTING_MATRIX:
-        return [f"handoff.to_role has no routing policy: {target_role!r}"]
-    allowed_models = ROUTING_MATRIX[target_role]
-    if model not in TARGET_MODELS or model not in allowed_models:
-        errors.append(f"{target_role} cannot route to target model {model!r}")
-    elif effort not in allowed_models[model]:
-        errors.append(f"{target_role} cannot use effort {effort!r} with {model}")
-
-    if mode == "durable":
+    if mode == "ephemeral_research":
+        if model not in TARGET_MODELS:
+            errors.append(f"ephemeral_research cannot route to target model {model!r}")
+        elif model == "gpt-5.6-luna" and effort != "Low":
+            errors.append("ephemeral Luna routing is limited to Low effort")
+        elif model == "gpt-5.6-terra" and effort != "Low":
+            errors.append("ephemeral Terra routing is limited to Low effort")
+        elif model == "gpt-5.6-sol" and "exceptional" not in rationale.lower():
+            errors.append("ephemeral Sol routing requires an explicit exceptional rationale")
+        if sandbox != "read-only":
+            errors.append("ephemeral_research handoffs must be read-only")
+    elif mode == "durable":
+        if target_role not in ROUTING_MATRIX:
+            return [f"handoff.to_role has no routing policy: {target_role!r}"]
+        allowed_models = ROUTING_MATRIX[target_role]
+        if model not in TARGET_MODELS or model not in allowed_models:
+            errors.append(f"{target_role} cannot route to target model {model!r}")
+        elif effort not in allowed_models[model]:
+            errors.append(f"{target_role} cannot use effort {effort!r} with {model}")
         expected_sandbox = "workspace-write" if target_role in {"implementation", "knowledge_steward"} else "read-only"
         if sandbox != expected_sandbox:
             errors.append(f"durable {target_role} handoff must use sandbox_mode={expected_sandbox!r}")
-    elif mode == "ephemeral_research":
-        if sandbox != "read-only":
-            errors.append("ephemeral_research handoffs must be read-only")
-        if model == "gpt-5.6-sol" and "exceptional" not in rationale.lower():
-            errors.append("ephemeral Sol routing requires an explicit exceptional rationale")
-        if model == "gpt-5.6-terra" and effort != "Low":
-            errors.append("ephemeral Terra routing is limited to Low effort")
-        if model == "gpt-5.6-luna" and effort != "Low":
-            errors.append("ephemeral Luna routing is limited to Low effort")
     else:
         errors.append(f"unknown execution mode: {mode!r}")
 
-    if model == "gpt-5.6-terra" and effort in {"Medium", "High"}:
+    if mode == "durable" and model == "gpt-5.6-terra" and effort in {"Medium", "High"}:
         lowered = rationale.lower()
         if "risk" not in lowered and "complex" not in lowered:
             errors.append("Terra effort above Low requires an explicit risk/complexity rationale")
-    if target_role in {"qa", "reviewer"} and effort == "High":
+    if mode == "durable" and target_role in {"qa", "reviewer"} and effort == "High":
         if "risk" not in rationale.lower():
             errors.append(f"{target_role} High effort requires an explicit high-risk rationale")
-    if target_role == "knowledge_steward" and model == "gpt-5.6-sol" and "decision" not in rationale.lower():
+    if mode == "durable" and target_role == "knowledge_steward" and model == "gpt-5.6-sol" and "decision" not in rationale.lower():
         errors.append("Knowledge Steward Sol routing requires a decision-heavy rationale")
 
     if value.get("is_correction"):
@@ -197,8 +206,37 @@ def validate_routing(value: dict[str, Any]) -> list[str]:
             errors.append("corrections must use an allowed implementation model")
         if mode != "durable":
             errors.append("corrections require durable delivery")
-    if target_role == "reviewer" and model != "gpt-5.6-sol":
+    if mode == "durable" and target_role == "reviewer" and model != "gpt-5.6-sol":
         errors.append("Reviewer activation must use gpt-5.6-sol")
+    return errors
+
+
+def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
+    state = value.get("lifecycle_state")
+    work_item = value.get("work_item", {})
+    evidence = [str(item).lower() for item in value.get("evidence", [])]
+    errors: list[str] = []
+    if state == LifecycleState.IMPLEMENTATION_READY.value:
+        if not re.fullmatch(r"[0-9a-f]{40}", str(work_item.get("commit_sha") or "")):
+            errors.append("IMPLEMENTATION_READY requires an exact commit SHA")
+        if not work_item.get("pull_request_url"):
+            errors.append("IMPLEMENTATION_READY requires a pull request URL")
+        if not any("local gate" in item for item in evidence):
+            errors.append("IMPLEMENTATION_READY requires local-gate evidence")
+        if not any("ci" in item for item in evidence):
+            errors.append("IMPLEMENTATION_READY requires CI evidence")
+    if state == LifecycleState.REVIEW_ACTIVE.value:
+        if value.get("to_role") != "reviewer":
+            errors.append("REVIEW_ACTIVE handoffs must explicitly activate Reviewer")
+        if value.get("target_model") != "gpt-5.6-sol" or value.get("effort") != "Medium":
+            errors.append("REVIEW_ACTIVE must activate Reviewer with Sol/Medium")
+        if not work_item.get("commit_sha") or not work_item.get("pull_request_url"):
+            errors.append("REVIEW_ACTIVE requires the exact implementation SHA and PR URL")
+    if state == LifecycleState.CORRECTION_ACTIVE.value:
+        if value.get("to_role") != "implementation" or not value.get("is_correction"):
+            errors.append("CORRECTION_ACTIVE must return to the same Implementation task")
+    if state == LifecycleState.HUMAN_MERGE_READY.value and value.get("terminal_state") != "completed":
+        errors.append("HUMAN_MERGE_READY requires completed non-human gates")
     return errors
 
 
@@ -221,6 +259,108 @@ class Reconciliation(str, Enum):
     APPLIED = "applied"
     ABSENT = "absent"
     UNAVAILABLE = "unavailable"
+
+
+class LifecycleState(str, Enum):
+    IMPLEMENTATION_ACTIVE = "IMPLEMENTATION_ACTIVE"
+    IMPLEMENTATION_READY = "IMPLEMENTATION_READY"
+    REVIEW_ACTIVE = "REVIEW_ACTIVE"
+    CHANGES_REQUESTED = "CHANGES_REQUESTED"
+    CORRECTION_ACTIVE = "CORRECTION_ACTIVE"
+    REVIEW_ACCEPTED = "REVIEW_ACCEPTED"
+    HUMAN_MERGE_READY = "HUMAN_MERGE_READY"
+    BLOCKED = "BLOCKED"
+    DELIVERY_UNKNOWN = "DELIVERY_UNKNOWN"
+
+
+class LifecycleTransitionError(ValueError):
+    pass
+
+
+class CoordinatorLifecycle:
+    """Coordinator-owned lifecycle; role completion never terminally completes it."""
+
+    _TRANSITIONS = {
+        LifecycleState.IMPLEMENTATION_ACTIVE: {LifecycleState.IMPLEMENTATION_READY},
+        LifecycleState.IMPLEMENTATION_READY: {LifecycleState.REVIEW_ACTIVE},
+        LifecycleState.REVIEW_ACTIVE: {LifecycleState.CHANGES_REQUESTED, LifecycleState.REVIEW_ACCEPTED},
+        LifecycleState.CHANGES_REQUESTED: {LifecycleState.CORRECTION_ACTIVE},
+        LifecycleState.CORRECTION_ACTIVE: {LifecycleState.IMPLEMENTATION_READY},
+        LifecycleState.REVIEW_ACCEPTED: {LifecycleState.HUMAN_MERGE_READY},
+    }
+
+    def __init__(self) -> None:
+        self.state = LifecycleState.IMPLEMENTATION_ACTIVE
+        self._operations: dict[str, LifecycleState] = {}
+        self._unknown: tuple[str, LifecycleState, LifecycleState] | None = None
+
+    @staticmethod
+    def _valid_operation(operation_id: str) -> bool:
+        return bool(re.fullmatch(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", operation_id))
+
+    @staticmethod
+    def _ready_evidence(evidence: dict[str, str] | None) -> bool:
+        if not isinstance(evidence, dict):
+            return False
+        sha = evidence.get("commit_sha", "")
+        return (
+            bool(re.fullmatch(r"[0-9a-f]{40}", sha))
+            and bool(evidence.get("pull_request_url"))
+            and bool(evidence.get("local_gates"))
+            and bool(evidence.get("ci_status"))
+        )
+
+    def transition(
+        self,
+        actor: str,
+        next_state: LifecycleState,
+        operation_id: str,
+        evidence: dict[str, str] | None = None,
+    ) -> LifecycleState:
+        if actor != "coordinator":
+            raise LifecycleTransitionError("Coordinator is the sole lifecycle owner")
+        if not self._valid_operation(operation_id):
+            raise LifecycleTransitionError("lifecycle transitions require a UUID operation ID")
+        prior = self._operations.get(operation_id)
+        if prior is not None:
+            if prior is not next_state:
+                raise LifecycleTransitionError("operation ID cannot be reused for another transition")
+            return self.state
+        if self.state in {LifecycleState.DELIVERY_UNKNOWN, LifecycleState.BLOCKED, LifecycleState.HUMAN_MERGE_READY}:
+            raise LifecycleTransitionError(f"cannot transition from {self.state.value}")
+        if next_state == LifecycleState.IMPLEMENTATION_READY and not self._ready_evidence(evidence):
+            raise LifecycleTransitionError("IMPLEMENTATION_READY requires commit SHA, PR URL, local gates, and CI status")
+        if next_state not in self._TRANSITIONS.get(self.state, set()) and next_state is not LifecycleState.BLOCKED:
+            raise LifecycleTransitionError(f"invalid lifecycle transition: {self.state.value} -> {next_state.value}")
+        if next_state is LifecycleState.REVIEW_ACTIVE and self.state is not LifecycleState.IMPLEMENTATION_READY:
+            raise LifecycleTransitionError("Reviewer activates only from IMPLEMENTATION_READY")
+        self._operations[operation_id] = next_state
+        self.state = next_state
+        return self.state
+
+    def observe_delivery_unknown(self, actor: str, operation_id: str, intended_state: LifecycleState) -> LifecycleState:
+        if actor != "coordinator":
+            raise LifecycleTransitionError("Coordinator is the sole lifecycle owner")
+        if not self._valid_operation(operation_id):
+            raise LifecycleTransitionError("lifecycle transitions require a UUID operation ID")
+        if self.state in {LifecycleState.BLOCKED, LifecycleState.HUMAN_MERGE_READY}:
+            raise LifecycleTransitionError(f"cannot observe transport from {self.state.value}")
+        if intended_state not in self._TRANSITIONS.get(self.state, set()):
+            raise LifecycleTransitionError("unknown transport target is not a valid next lifecycle state")
+        self._unknown = (operation_id, self.state, intended_state)
+        self.state = LifecycleState.DELIVERY_UNKNOWN
+        return self.state
+
+    def reconcile_delivery(self, actor: str, operation_id: str, applied: bool) -> LifecycleState:
+        if actor != "coordinator":
+            raise LifecycleTransitionError("Coordinator is the sole lifecycle owner")
+        if self._unknown is None or self._unknown[0] != operation_id:
+            raise LifecycleTransitionError("exact DELIVERY_UNKNOWN operation must be reconciled")
+        _, resume_state, intended_state = self._unknown
+        self.state = intended_state if applied else resume_state
+        self._unknown = None
+        self._operations[operation_id] = self.state
+        return self.state
 
 
 @dataclass
@@ -416,4 +556,4 @@ def validate_handoff(value: Any, schema: dict[str, Any] | None = None) -> list[s
     schema_errors = _validate_schema(value, authoritative_schema, authoritative_schema, "handoff")
     if compatibility_errors or schema_errors or not isinstance(value, dict):
         return compatibility_errors or schema_errors
-    return validate_routing(value)
+    return validate_routing(value) + validate_lifecycle_handoff(value)

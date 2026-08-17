@@ -8,6 +8,7 @@ Session role code: RV.
 
 Inputs: authoritative issue; PR diff and commit; product and architecture constraints; ADR context from adr-context; QA and CI evidence.
 Routing: Independent Reviewer activation explicitly uses target_model `gpt-5.6-sol` and effort `Medium`; High requires an explicit high-risk rationale and every activation passes model, effort, and rationale explicitly.
+Lifecycle: Reviewer activates only from Coordinator in REVIEW_ACTIVE with an exact implementation SHA, and returns completed, changes_requested, or blocked with durable PR/review evidence to Coordinator; never routes directly to Implementation.
 Outputs: prioritized findings; independent verification evidence; approval recommendation or changes_requested; residual risk and human gates.
 Terminal states: completed, changes_requested, blocked.
 Escalation conditions: missing evidence; unverifiable or unsafe change; scope drift; secret or data-boundary concern; unresolved QA finding; required human decision.

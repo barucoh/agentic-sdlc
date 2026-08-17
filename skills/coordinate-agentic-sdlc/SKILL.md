@@ -19,4 +19,6 @@ description: Coordinate Agentic SDLC role work, durable issue-backed sessions, s
 10. Provide a GitHub-reconstructible copy/paste fallback containing operation ID, issue or PR URL, objective, expected output, evidence, and next owner. Never persist thread IDs.
 11. Send QA or Reviewer corrections back to the same Implementation task using an allowed Luna/Terra implementation route. Reviewer activation explicitly uses Sol/Medium or justified Sol/High. Require a finding-to-fix verification map, then repeat independent verification. Implementation cannot approve itself.
 
+12. Coordinator is the sole lifecycle owner: keep the task active after Implementation completes, require IMPLEMENTATION_READY evidence (exact SHA, PR URL, local gates, CI), explicitly activate the existing Reviewer, loop changes_requested through the same Implementation task, and return to the user only after REVIEW_ACCEPTED and green non-human gates. If host task-control tools are unavailable, stop as blocked with a reconstructible handoff.
+
 Use only `completed`, `changes_requested`, or `blocked` as handoff terminal states. `DELIVERY_UNKNOWN` is transport state only.

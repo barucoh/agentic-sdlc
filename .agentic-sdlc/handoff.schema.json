@@ -16,6 +16,7 @@
     "execution_mode",
     "sandbox_mode",
     "is_correction",
+    "lifecycle_state",
     "objective",
     "inputs",
     "constraints",
@@ -68,6 +69,10 @@
       "enum": ["read-only", "workspace-write"]
     },
     "is_correction": { "type": "boolean" },
+    "lifecycle_state": {
+      "type": "string",
+      "enum": ["IMPLEMENTATION_ACTIVE", "IMPLEMENTATION_READY", "REVIEW_ACTIVE", "CHANGES_REQUESTED", "CORRECTION_ACTIVE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED", "DELIVERY_UNKNOWN"]
+    },
     "watchdog_seconds": { "type": "integer", "minimum": 20, "maximum": 30 },
     "inputs": { "$ref": "#/$defs/stringList" },
     "constraints": { "$ref": "#/$defs/stringList" },

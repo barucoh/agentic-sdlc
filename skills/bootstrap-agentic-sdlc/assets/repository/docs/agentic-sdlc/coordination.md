@@ -17,6 +17,14 @@ The complete title may contain at most 36 Unicode characters, including the pref
 
 Every durable handoff includes explicit `target_model`, `effort`, and one-sentence `rationale`; task creation and activation must pass them explicitly and may not inherit a coordinator or system default. The repository-native matrix is encoded in the handoff validator and `.agentic-sdlc/config.yaml`: decision/orchestration roles use Sol/Medium, routine implementation and Knowledge Steward work use Luna/Low, nontrivial implementation may use Terra with explicit risk/complexity justification for higher effort, and QA/Reviewer use Sol/Medium with explicit high-risk rationale for High. Ephemeral research is always read-only and uses Luna/Low by default, Terra/Low for unusually complex synthesis, or Sol only with explicit exceptional rationale.
 
+## Coordinator-owned lifecycle
+
+Coordinator is the sole lifecycle owner and message router. Implementation and Reviewer do not conduct an uncontrolled peer-to-peer loop, and Coordinator remains active after Implementation completion.
+
+The deterministic lifecycle is `IMPLEMENTATION_ACTIVE -> IMPLEMENTATION_READY -> REVIEW_ACTIVE -> (CHANGES_REQUESTED -> CORRECTION_ACTIVE -> IMPLEMENTATION_READY -> REVIEW_ACTIVE)* -> REVIEW_ACCEPTED -> HUMAN_MERGE_READY`. `BLOCKED` and `DELIVERY_UNKNOWN` are transport handling states, not permission to silently finish.
+
+`IMPLEMENTATION_READY` requires durable GitHub evidence, the exact commit SHA, PR URL, local-gate results, and CI status. Coordinator observes Implementation completion through bounded host monitoring when available, reconciles GitHub, and explicitly activates the existing Reviewer task (creating it once only if absent) with Sol/Medium and the exact SHA. Reviewer returns completed, changes_requested, or blocked with durable PR/review evidence. Changes_requested returns a finding-to-fix map to the same Implementation task using Luna or Terra, then the corrected exact SHA and green gates reactivate the same Reviewer task. Coordinator returns to the user only after REVIEW_ACCEPTED and all non-human gates are green, or after genuine blocked authority. If host task-control tools are unavailable, Coordinator stops as blocked with a reconstructible handoff.
+
 1. Generate one UUID operation ID before every cross-task action and include it in the versioned handoff.
    Replace the zero UUID in `handoff-template.json`; it is a schema-valid placeholder, never an operation ID to reuse.
 2. Persist the requested outcome in an authoritative GitHub issue, PR, review comment, or commit before relying on an optional wake-up message.

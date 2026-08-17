@@ -1,16 +1,16 @@
 {
   "files": {
-    ".agentic-sdlc/config.yaml": "bd6ba304f7da2bc0396bec16e68586801f1ba7d49e68a01e79c2f99f889d77e7",
-    ".agentic-sdlc/handoff-template.json": "8276aeaa644cb9e6045b7f57312f667e9cfb1c0d36337aea1290d020b0b88011",
-    ".agentic-sdlc/handoff.schema.json": "1d791733d6941174679d3f3fd88dd188a3030322fbc564438cbe5bc0fba91828",
+    ".agentic-sdlc/config.yaml": "28de77e328ac905e3496fd1140c2f8303021f8625b6df7d39eb5ac17ec50c59c",
+    ".agentic-sdlc/handoff-template.json": "2e49079a88072caf52007f225a2d89d44b166acdd821da46286125a6ecaf4388",
+    ".agentic-sdlc/handoff.schema.json": "a6ecacd0a302afcb4e6177c64b8ae9125f1445bfd7adec4217b79c94db79fcb3",
     ".codex/agents/architecture.toml": "5032b67f3d3aad6de677b09cb1fa5248aed410ff3423c2127dea348789de31ee",
-    ".codex/agents/coordinator.toml": "ace02b239e6d4dcce8d0ec1992bc35b3eaeeaf730a346440d59ab0f8539688f6",
-    ".codex/agents/implementation.toml": "47ce6b2ae7c1915c75ad4f79a7be6d199996efc519d64d45b1d61468f3551b13",
+    ".codex/agents/coordinator.toml": "82a1abb6c2d38f1006fd674a3ac25019d03055cf4a303a7d3818cb2034fb9226",
+    ".codex/agents/implementation.toml": "561e25bbd47dfeccd785d931c61d714bc520753a7ed64a433185b92323d4c848",
     ".codex/agents/knowledge_steward.toml": "7f326468c5bc9731995a1ef941034be058cde33fc7af3788e759bfe9595c4a2e",
     ".codex/agents/product.toml": "67bf6547ef110c070ce5d010ad85470fd03320049a5f5447f3bf6b67e5acb0f7",
     ".codex/agents/qa.toml": "c5d509f7c25abca3439eb9197fb403e59edf205e6d149030e15aa26cf47f2eb3",
-    ".codex/agents/reviewer.toml": "7542fe2b4038c5fa7db87799442a669bf70c68554376bd41b6b5ec806a7ad957",
-    "docs/agentic-sdlc/coordination.md": "ac4e00ef644b9d1ba2ff27d06b660f5f4a67fd146a724778f87e62a7868abf4e",
+    ".codex/agents/reviewer.toml": "458727cc75dba3fa4aa738310d0a8a241d8dd030027d65e1da0ae6753382a6b8",
+    "docs/agentic-sdlc/coordination.md": "fa142e0d789c266f175f328f127cb305c56c46cea970c1a27ed83fead93822ad",
     "docs/agentic-sdlc/role-contracts.md": "b0f20bab0268887463b8822e902ce8ab5d8089bad2283d69b9273a13aa68265c"
   },
   "managed_blocks": {

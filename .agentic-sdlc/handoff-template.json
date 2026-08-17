@@ -18,6 +18,7 @@
   "execution_mode": "durable",
   "sandbox_mode": "workspace-write",
   "is_correction": false,
+  "lifecycle_state": "IMPLEMENTATION_ACTIVE",
   "watchdog_seconds": 25,
   "inputs": ["Authoritative issue and prior accepted handoffs"],
   "constraints": ["Repository policy and human merge authority"],

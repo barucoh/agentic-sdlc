@@ -112,6 +112,14 @@ for path in sorted(agent_root.glob("*.toml")):
     role_name = value.get("name")
     if role_name in ROLE_CODES and f"Session role code: {ROLE_CODES[role_name]}." not in value.get("developer_instructions", ""):
         errors.append(f"agent contract has incorrect session role code in {path.relative_to(ROOT)}")
+    lifecycle_requirements = {
+        "coordinator": "Coordinator alone owns",
+        "implementation": "Report IMPLEMENTATION_READY only through Coordinator",
+        "reviewer": "Reviewer activates only from Coordinator",
+    }
+    required_lifecycle = lifecycle_requirements.get(role_name)
+    if required_lifecycle and required_lifecycle not in value.get("developer_instructions", ""):
+        errors.append(f"agent contract missing lifecycle ownership rule in {path.relative_to(ROOT)}")
 if role_names != expected_roles:
     errors.append(f"agent roles differ: expected {sorted(expected_roles)}, found {sorted(str(x) for x in role_names)}")
 if set(ROLE_CODES) != expected_roles or len(set(ROLE_CODES.values())) != len(expected_roles):

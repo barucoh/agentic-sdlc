@@ -16,6 +16,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from coordination_protocol import (  # noqa: E402
     DeliveryState,
+    CoordinatorLifecycle,
+    LifecycleState,
+    LifecycleTransitionError,
     Observation,
     OperationLedger,
     ROLE_CODES,
@@ -224,6 +227,96 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 value = copy.deepcopy(valid)
                 value.update(changes)
                 self.assertTrue(validate_handoff(value))
+
+    def test_lifecycle_requires_ready_evidence_and_coordinator_ownership(self) -> None:
+        lifecycle = CoordinatorLifecycle()
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("implementation", LifecycleState.IMPLEMENTATION_READY, str(uuid4()))
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()))
+        evidence = {
+            "commit_sha": "a" * 40,
+            "pull_request_url": "https://github.com/o/r/pull/6",
+            "local_gates": "passed",
+            "ci_status": "passed",
+        }
+        self.assertEqual(
+            lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence),
+            LifecycleState.IMPLEMENTATION_READY,
+        )
+
+    def test_lifecycle_sequences_review_correction_and_human_gate(self) -> None:
+        lifecycle = CoordinatorLifecycle()
+        evidence = {"commit_sha": "a" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed"}
+        for next_state in (LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE):
+            self.assertEqual(lifecycle.transition("coordinator", next_state, str(uuid4()), evidence), next_state)
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.CHANGES_REQUESTED, str(uuid4())), LifecycleState.CHANGES_REQUESTED)
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.CORRECTION_ACTIVE, str(uuid4())), LifecycleState.CORRECTION_ACTIVE)
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence), LifecycleState.IMPLEMENTATION_READY)
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, str(uuid4()), evidence), LifecycleState.REVIEW_ACTIVE)
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACCEPTED, str(uuid4())), LifecycleState.REVIEW_ACCEPTED)
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.HUMAN_MERGE_READY, str(uuid4())), LifecycleState.HUMAN_MERGE_READY)
+
+    def test_lifecycle_duplicate_operations_and_unknown_delivery_cannot_blind_activate(self) -> None:
+        lifecycle = CoordinatorLifecycle()
+        evidence = {"commit_sha": "b" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed"}
+        lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
+        operation_id = str(uuid4())
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, operation_id, evidence), LifecycleState.REVIEW_ACTIVE)
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, operation_id, evidence), LifecycleState.REVIEW_ACTIVE)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.REVIEW_ACCEPTED, operation_id)
+
+        lifecycle = CoordinatorLifecycle()
+        lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
+        unknown_id = str(uuid4())
+        self.assertEqual(lifecycle.observe_delivery_unknown("coordinator", unknown_id, LifecycleState.REVIEW_ACTIVE), LifecycleState.DELIVERY_UNKNOWN)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, str(uuid4()), evidence)
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", unknown_id, False), LifecycleState.IMPLEMENTATION_READY)
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, str(uuid4()), evidence), LifecycleState.REVIEW_ACTIVE)
+
+    def test_lifecycle_can_block_when_host_task_control_is_unavailable(self) -> None:
+        lifecycle = CoordinatorLifecycle()
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.BLOCKED, str(uuid4())), LifecycleState.BLOCKED)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), {})
+
+    def test_lifecycle_handoff_validation_requires_exact_ready_and_review_evidence(self) -> None:
+        ready = self.handoff()
+        ready.update(
+            {
+                "lifecycle_state": "IMPLEMENTATION_READY",
+                "evidence": ["local gates passed", "CI passed"],
+                "work_item": {
+                    **ready["work_item"],
+                    "pull_request_url": "https://github.com/o/r/pull/6",
+                    "commit_sha": "c" * 40,
+                },
+            }
+        )
+        self.assertEqual(validate_handoff(ready), [])
+        ready["work_item"]["commit_sha"] = "not-exact"
+        self.assertTrue(validate_handoff(ready))
+
+        reviewer = self.handoff()
+        reviewer.update(
+            {
+                "lifecycle_state": "REVIEW_ACTIVE",
+                "to_role": "reviewer",
+                "target_model": "gpt-5.6-sol",
+                "effort": "Medium",
+                "sandbox_mode": "read-only",
+                "work_item": {
+                    **reviewer["work_item"],
+                    "pull_request_url": "https://github.com/o/r/pull/6",
+                    "commit_sha": "d" * 40,
+                },
+            }
+        )
+        self.assertEqual(validate_handoff(reviewer), [])
+        reviewer["target_model"] = "gpt-5.6-luna"
+        self.assertTrue(validate_handoff(reviewer))
 
     def test_executable_handoff_validation_enforces_every_schema_constraint(self) -> None:
         mutations = {
