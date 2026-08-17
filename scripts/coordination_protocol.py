@@ -213,6 +213,8 @@ def validate_routing(value: dict[str, Any]) -> list[str]:
 
 def lifecycle_tuple(issue: int, current: LifecycleState, nxt: LifecycleState, event: str | None = None) -> tuple[str, str, str, str] | None:
     """Single authority for lifecycle sender/receiver roles and logical keys."""
+    if event is None:
+        return None
     pairs = {
         (LifecycleState.IMPLEMENTATION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): ("implementation", "coordinator"),
         (LifecycleState.CORRECTION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): ("implementation", "coordinator"),
@@ -237,22 +239,24 @@ def lifecycle_tuple(issue: int, current: LifecycleState, nxt: LifecycleState, ev
         LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "HUMAN_MERGE_READY",
         LifecycleState.BLOCKED: "BLOCKED",
     }
-    if event is not None and events.get(nxt) != event:
+    if events.get(nxt) != event:
         return None
     source, target = roles
     return source, target, f"issue-{issue}-{source.replace('_', '-')}", f"issue-{issue}-{target.replace('_', '-')}"
 
 
-def canonicalize_and_validate_fallback(fallback: Any, operation_id: str) -> dict[str, str] | None:
+def canonicalize_and_validate_fallback(fallback: Any, operation_id: str, work_item: CanonicalWorkItem | None = None) -> dict[str, str] | None:
     fields = ("repository", "issue_or_pr_url", "operation_id", "objective", "expected_output", "evidence", "next_owner")
-    if not isinstance(fallback, dict) or any(not isinstance(fallback.get(field), str) or not fallback[field].strip() for field in fields):
+    if not isinstance(fallback, dict) or set(fallback) != set(fields) or any(not isinstance(fallback.get(field), str) or not fallback[field].strip() or fallback[field] != fallback[field].strip() for field in fields):
         return None
-    result = {field: fallback[field].strip() for field in fields}
+    result = {field: fallback[field] for field in fields}
     if result["operation_id"] != operation_id or not _valid_repository(result["repository"]):
         return None
     if result["next_owner"] not in {"coordinator", "product", "architecture", "implementation", "qa", "reviewer", "knowledge_steward", "human_owner"}:
         return None
     if not re.fullmatch(r"https://github\.com/" + re.escape(result["repository"]) + r"/(issues|pull)/[1-9][0-9]*", result["issue_or_pr_url"]):
+        return None
+    if work_item is not None and (result["repository"] != work_item.repository or result["issue_or_pr_url"] not in {work_item.issue_url, work_item.pull_request_url}):
         return None
     return result
 
@@ -408,13 +412,13 @@ class CoordinatorLifecycle:
         LifecycleState.REVIEW_ACCEPTED: {LifecycleState.HUMAN_MERGE_READY},
     }
 
-    def __init__(self, issue_number: int, work_item: dict[str, Any]) -> None:
+    def __init__(self, work_item: dict[str, Any]) -> None:
         self.state = LifecycleState.IMPLEMENTATION_ACTIVE
-        self.issue_number = issue_number
-        self.coordinator_key = f"issue-{issue_number}-coordinator"
-        self.implementation_key = f"issue-{issue_number}-implementation"
-        self.reviewer_key = f"issue-{issue_number}-reviewer"
-        self.work_item = CanonicalWorkItem.from_value(work_item).as_dict()
+        self.work_item = CanonicalWorkItem.from_value(work_item)
+        self.issue_number = self.work_item.issue_number
+        self.coordinator_key = f"issue-{self.issue_number}-coordinator"
+        self.implementation_key = f"issue-{self.issue_number}-implementation"
+        self.reviewer_key = f"issue-{self.issue_number}-reviewer"
         self._operations: dict[str, dict[str, Any]] = {}
         self._unknown: str | None = None
 
@@ -447,21 +451,22 @@ class CoordinatorLifecycle:
         if not self._valid_operation(operation_id):
             raise LifecycleTransitionError("lifecycle transitions require a UUID operation ID")
         if next_state is LifecycleState.BLOCKED:
-            fallback = canonicalize_and_validate_fallback(fallback, operation_id)
-            if fallback is None or fallback["repository"] != self.work_item["repository"]:
+            fallback = canonicalize_and_validate_fallback(fallback, operation_id, self.work_item)
+            if fallback is None or fallback["repository"] != self.work_item.repository:
                 raise LifecycleTransitionError("BLOCKED requires a valid reconstructible fallback")
             probe = {"lifecycle_state": "BLOCKED", "operation_id": operation_id, "blocked_fallback": fallback}
             fallback_errors = validate_lifecycle_handoff({**json.loads(json.dumps({"schema_version":"1.0.0","operation_id":operation_id,"from_role":"coordinator","to_role":"coordinator","work_item":{"repository":"o/r","issue_number":self.issue_number,"issue_url":"https://github.com/o/r/issues/1","title":"blocked"},"target_model":"gpt-5.6-sol","effort":"Medium","rationale":"A bounded implementation task.","execution_mode":"durable","sandbox_mode":"read-only","is_correction":False,"lifecycle_state":"BLOCKED","lifecycle_event":"BLOCKED","source_task_key":self.coordinator_key,"target_task_key":self.coordinator_key,"readiness_evidence":{"commit_sha":None,"pull_request_url":None,"local_gates":"not_run","ci_status":"not_run","required_checks":[]},"objective":"Recover","inputs":["x"],"constraints":["x"],"adrs":["x"],"acceptance_criteria":["x"],"outputs":["x"],"dependencies":["x"],"escalation":["x"],"evidence":["x"],"residual_risk":["x"],"terminal_state":"blocked","blocked_fallback":fallback})), **probe})
             if fallback_errors:
                 raise LifecycleTransitionError("BLOCKED requires a valid reconstructible fallback")
         if source_task_key is None or target_task_key is None:
-            tuple_ = lifecycle_tuple(self.issue_number, self.state, next_state)
+            default_event = {LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE", LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE", LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "HUMAN_MERGE_READY", LifecycleState.BLOCKED: "BLOCKED"}.get(next_state)
+            tuple_ = lifecycle_tuple(self.issue_number, self.state, next_state, event or default_event)
             source_task_key, target_task_key = tuple_[2:] if tuple_ else (self.coordinator_key, self.coordinator_key)
         event = event or {LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE", LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE", LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "HUMAN_MERGE_READY", LifecycleState.BLOCKED: "BLOCKED"}.get(next_state)
         if not self._direction(self.state, next_state, source_task_key, target_task_key, event):
             raise LifecycleTransitionError("unauthorized lifecycle event direction")
         intent = json.dumps({"state": self.state.value, "next": next_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback}, sort_keys=True, separators=(",", ":"))
-        if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(evidence, self.work_item):
+        if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(evidence, self.work_item.as_dict()):
             raise LifecycleTransitionError("lifecycle transition requires canonical passed readiness evidence")
         prior = self._operations.get(operation_id)
         if prior is not None:
@@ -496,13 +501,14 @@ class CoordinatorLifecycle:
         if operation_id in self._operations:
             raise LifecycleTransitionError("operation ID cannot be overwritten while delivery is unknown")
         if intended_state is LifecycleState.BLOCKED:
-            fallback = canonicalize_and_validate_fallback(fallback, operation_id)
-            if fallback is None or fallback["repository"] != self.work_item["repository"]:
+            fallback = canonicalize_and_validate_fallback(fallback, operation_id, self.work_item)
+            if fallback is None or fallback["repository"] != self.work_item.repository:
                 raise LifecycleTransitionError("BLOCKED unknown delivery requires the canonical work-item fallback")
-        tuple_ = lifecycle_tuple(self.issue_number, self.state, intended_state)
+        default_event = {LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE", LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE", LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.BLOCKED: "BLOCKED"}.get(intended_state)
+        tuple_ = lifecycle_tuple(self.issue_number, self.state, intended_state, event or default_event)
         source_task_key = source_task_key or (tuple_[2] if tuple_ else self.coordinator_key)
         target_task_key = target_task_key or (tuple_[3] if tuple_ else self.coordinator_key)
-        event = event or {LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE", LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE", LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED"}.get(intended_state)
+        event = event or {LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE", LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE", LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.BLOCKED: "BLOCKED"}.get(intended_state)
         if not self._direction(self.state, intended_state, source_task_key, target_task_key, event):
             raise LifecycleTransitionError("unknown delivery requires an allowed exact lifecycle direction")
         intent = json.dumps({"state": self.state.value, "next": intended_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback}, sort_keys=True, separators=(",", ":"))
@@ -522,7 +528,7 @@ class CoordinatorLifecycle:
         stored = json.loads(record["intent"])
         if not self._direction(resume_state, intended_state, stored["source"], stored["target"], stored["event"]):
             raise LifecycleTransitionError("APPLIED reconciliation has an unauthorized recorded direction")
-        if applied and intended_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(stored["evidence"], self.work_item):
+        if applied and intended_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(stored["evidence"], self.work_item.as_dict()):
             raise LifecycleTransitionError("APPLIED reconciliation requires valid readiness evidence")
         self.state = intended_state if applied else resume_state
         self._unknown = None

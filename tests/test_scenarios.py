@@ -150,7 +150,7 @@ class SessionTitleTests(unittest.TestCase):
 
 class HandoffAndCoordinationTests(unittest.TestCase):
     def lifecycle(self) -> CoordinatorLifecycle:
-        return CoordinatorLifecycle(5, {"repository": "o/r", "issue_number": 5, "issue_url": "https://github.com/o/r/issues/5"})
+        return CoordinatorLifecycle({"repository": "o/r", "issue_number": 5, "issue_url": "https://github.com/o/r/issues/5"})
 
     def handoff(self) -> dict:
         return json.loads(
@@ -320,7 +320,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         operation_id = str(uuid4())
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("coordinator", LifecycleState.BLOCKED, operation_id)
-        fallback = {"repository": "o/r", "issue_or_pr_url": "https://github.com/o/r/issues/1", "operation_id": operation_id, "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
+        fallback = {"repository": "o/r", "issue_or_pr_url": "https://github.com/o/r/issues/5", "operation_id": operation_id, "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.BLOCKED, operation_id, fallback=fallback), LifecycleState.BLOCKED)
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), {})
