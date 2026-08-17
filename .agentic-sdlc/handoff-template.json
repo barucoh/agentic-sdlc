@@ -12,6 +12,12 @@
     "commit_sha": null
   },
   "objective": "State the one outcome this handoff requests.",
+  "target_model": "gpt-5.6-luna",
+  "effort": "Low",
+  "rationale": "This is a bounded implementation task with straightforward verification.",
+  "execution_mode": "durable",
+  "sandbox_mode": "workspace-write",
+  "is_correction": false,
   "watchdog_seconds": 25,
   "inputs": ["Authoritative issue and prior accepted handoffs"],
   "constraints": ["Repository policy and human merge authority"],

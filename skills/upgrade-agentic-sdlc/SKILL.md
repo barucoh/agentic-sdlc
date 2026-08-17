@@ -13,4 +13,6 @@ description: Upgrade an existing repository to a newer Agentic SDLC release. Use
 6. The tool validates managed-state schema, plugin version, project identity, the complete managed path set, file hashes, and managed-block hash. It writes schema, applied plugin version, and new hashes only after a conflict-free apply. `check` must pass before completion.
 7. Report changed files, deleted obsolete generated files, preserved customizations, unresolved conflicts, exact validation, and version-control rollback instructions.
 
+The upgrade preserves and validates the repository-native model-routing policy. Every durable handoff must explicitly pass `target_model`, `effort`, and a one-sentence `rationale`; invalid role/model/effort pairs, implicit defaults, and write-capable ephemeral research are conflicts.
+
 Existing sessions are not renamed automatically. Apply the canonical `#<issue number> <role code> - <issue title>` policy prospectively unless the user requests a one-time rename audit. Repository migration must preserve `project_name` metadata while ensuring it is absent from `session_title_format`.

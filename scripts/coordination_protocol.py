@@ -55,6 +55,37 @@ ROLE_CODES = {
     "reviewer": "RV",
     "knowledge_steward": "KS",
 }
+TARGET_MODELS = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+EFFORT_LEVELS = ("Low", "Medium", "High")
+ROUTING_MATRIX = {
+    "coordinator": {"gpt-5.6-sol": {"Medium", "High"}},
+    "product": {"gpt-5.6-sol": {"Medium", "High"}},
+    "architecture": {"gpt-5.6-sol": {"Medium", "High"}},
+    "implementation": {
+        "gpt-5.6-luna": {"Low"},
+        "gpt-5.6-terra": {"Low", "Medium", "High"},
+    },
+    "qa": {"gpt-5.6-sol": {"Medium", "High"}},
+    "reviewer": {"gpt-5.6-sol": {"Medium", "High"}},
+    "knowledge_steward": {
+        "gpt-5.6-luna": {"Low"},
+        "gpt-5.6-sol": {"Medium"},
+    },
+    "human_owner": {"gpt-5.6-sol": {"Medium"}},
+}
+ROUTING_POLICY_VERSION = "repository-native-v1"
+ROUTING_CONFIG_LINES = (
+    "routing_policy: repository-native-v1",
+    "routing_matrix:",
+    '  coordinator: "gpt-5.6-sol/Medium"',
+    '  product: "gpt-5.6-sol/Medium"',
+    '  architecture: "gpt-5.6-sol/Medium"',
+    '  implementation: "gpt-5.6-luna/Low|gpt-5.6-terra/Low..High"',
+    '  qa: "gpt-5.6-sol/Medium|High-with-risk-rationale"',
+    '  reviewer: "gpt-5.6-sol/Medium|High-with-risk-rationale"',
+    '  knowledge_steward: "gpt-5.6-luna/Low|gpt-5.6-sol/Medium-with-decision-rationale"',
+    '  ephemeral_research: "gpt-5.6-luna/Low|gpt-5.6-terra/Low|gpt-5.6-sol/exceptional-rationale"',
+)
 
 
 def format_session_title(issue_number: int, role_code: str, issue_title: str) -> str:
@@ -108,6 +139,66 @@ def validate_session_title_config(config_text: str) -> list[str]:
             configured[role] = code
         if configured != ROLE_CODES:
             errors.append(f"role_codes must equal {ROLE_CODES!r}")
+    lines = config_text.splitlines()
+    missing_routing_lines = [line for line in ROUTING_CONFIG_LINES if line not in lines]
+    if missing_routing_lines:
+        errors.append("routing policy is incomplete: " + ", ".join(missing_routing_lines))
+    return errors
+
+
+def validate_routing(value: dict[str, Any]) -> list[str]:
+    """Enforce the repository-native model/effort policy and explicit activation."""
+
+    errors: list[str] = []
+    target_role = value.get("to_role")
+    model = value.get("target_model")
+    effort = value.get("effort")
+    mode = value.get("execution_mode")
+    sandbox = value.get("sandbox_mode")
+    rationale = value.get("rationale", "")
+    if target_role not in ROUTING_MATRIX:
+        return [f"handoff.to_role has no routing policy: {target_role!r}"]
+    allowed_models = ROUTING_MATRIX[target_role]
+    if model not in TARGET_MODELS or model not in allowed_models:
+        errors.append(f"{target_role} cannot route to target model {model!r}")
+    elif effort not in allowed_models[model]:
+        errors.append(f"{target_role} cannot use effort {effort!r} with {model}")
+
+    if mode == "durable":
+        expected_sandbox = "workspace-write" if target_role in {"implementation", "knowledge_steward"} else "read-only"
+        if sandbox != expected_sandbox:
+            errors.append(f"durable {target_role} handoff must use sandbox_mode={expected_sandbox!r}")
+    elif mode == "ephemeral_research":
+        if sandbox != "read-only":
+            errors.append("ephemeral_research handoffs must be read-only")
+        if model == "gpt-5.6-sol" and "exceptional" not in rationale.lower():
+            errors.append("ephemeral Sol routing requires an explicit exceptional rationale")
+        if model == "gpt-5.6-terra" and effort != "Low":
+            errors.append("ephemeral Terra routing is limited to Low effort")
+        if model == "gpt-5.6-luna" and effort != "Low":
+            errors.append("ephemeral Luna routing is limited to Low effort")
+    else:
+        errors.append(f"unknown execution mode: {mode!r}")
+
+    if model == "gpt-5.6-terra" and effort in {"Medium", "High"}:
+        lowered = rationale.lower()
+        if "risk" not in lowered and "complex" not in lowered:
+            errors.append("Terra effort above Low requires an explicit risk/complexity rationale")
+    if target_role in {"qa", "reviewer"} and effort == "High":
+        if "risk" not in rationale.lower():
+            errors.append(f"{target_role} High effort requires an explicit high-risk rationale")
+    if target_role == "knowledge_steward" and model == "gpt-5.6-sol" and "decision" not in rationale.lower():
+        errors.append("Knowledge Steward Sol routing requires a decision-heavy rationale")
+
+    if value.get("is_correction"):
+        if target_role != "implementation":
+            errors.append("corrections must return to the implementation role")
+        if model not in {"gpt-5.6-luna", "gpt-5.6-terra"}:
+            errors.append("corrections must use an allowed implementation model")
+        if mode != "durable":
+            errors.append("corrections require durable delivery")
+    if target_role == "reviewer" and model != "gpt-5.6-sol":
+        errors.append("Reviewer activation must use gpt-5.6-sol")
     return errors
 
 
@@ -251,6 +342,7 @@ def _matches_type(value: Any, expected: str) -> bool:
         "array": isinstance(value, list),
         "string": isinstance(value, str),
         "integer": isinstance(value, int) and not isinstance(value, bool),
+        "boolean": isinstance(value, bool),
         "null": value is None,
     }.get(expected, False)
 
@@ -321,4 +413,7 @@ def _validate_schema(
 def validate_handoff(value: Any, schema: dict[str, Any] | None = None) -> list[str]:
     authoritative_schema = schema or json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     compatibility_errors = _schema_support_errors(authoritative_schema)
-    return compatibility_errors or _validate_schema(value, authoritative_schema, authoritative_schema, "handoff")
+    schema_errors = _validate_schema(value, authoritative_schema, authoritative_schema, "handoff")
+    if compatibility_errors or schema_errors or not isinstance(value, dict):
+        return compatibility_errors or schema_errors
+    return validate_routing(value)

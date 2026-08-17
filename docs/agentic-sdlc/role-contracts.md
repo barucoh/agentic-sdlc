@@ -15,6 +15,8 @@ The executable contracts are the standalone files in `.codex/agents/`. Each decl
 
 The role codes are authoritative for prospective session titles. Unknown codes are invalid.
 
+Model routing is also authoritative: Coordinator/Product/Architecture use Sol/Medium by default; Implementation uses Luna/Low or Terra for nontrivial work; QA/Reviewer use Sol/Medium; Knowledge Steward uses Luna/Low. Every handoff carries explicit Target model, Effort, and one-sentence Rationale. Corrections return to the same Implementation task using Luna or Terra; Reviewer activation uses Sol/Medium or justified Sol/High.
+
 Roles that write or make material decisions run only in issue-backed user-visible tasks. An agent file is a reusable contract, not permission to invoke that role as an ephemeral subagent. Ephemeral subagents are restricted to bounded read-only information gathering.
 
 All roles use `.agentic-sdlc/handoff.schema.json`. Handoff and ADR algorithms are centralized in the schema, `docs/agentic-sdlc/coordination.md`, and `adr-context`, not repeated in individual role files.

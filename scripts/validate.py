@@ -93,6 +93,7 @@ contract_sections = (
     "Forbidden actions:",
     "Permission posture:",
     "Authority:",
+    "Routing:",
 )
 for path in sorted(agent_root.glob("*.toml")):
     try:

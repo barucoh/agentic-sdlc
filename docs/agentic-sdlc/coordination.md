@@ -15,6 +15,8 @@ The complete title may contain at most 36 Unicode characters, including the pref
 
 ## Cross-task operation protocol
 
+Every durable handoff includes explicit `target_model`, `effort`, and one-sentence `rationale`; task creation and activation must pass them explicitly and may not inherit a coordinator or system default. The repository-native matrix is encoded in the handoff validator and `.agentic-sdlc/config.yaml`: decision/orchestration roles use Sol/Medium, routine implementation and Knowledge Steward work use Luna/Low, nontrivial implementation may use Terra with explicit risk/complexity justification for higher effort, and QA/Reviewer use Sol/Medium with explicit high-risk rationale for High. Ephemeral research is always read-only and uses Luna/Low by default, Terra/Low for unusually complex synthesis, or Sol only with explicit exceptional rationale.
+
 1. Generate one UUID operation ID before every cross-task action and include it in the versioned handoff.
    Replace the zero UUID in `handoff-template.json`; it is a schema-valid placeholder, never an operation ID to reuse.
 2. Persist the requested outcome in an authoritative GitHub issue, PR, review comment, or commit before relying on an optional wake-up message.

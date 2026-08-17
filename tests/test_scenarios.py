@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import subprocess
@@ -24,6 +25,7 @@ from coordination_protocol import (  # noqa: E402
     format_session_title,
     session_title_for_role,
     validate_handoff,
+    validate_routing,
     validate_session_title_config,
 )
 import manage_repository  # noqa: E402
@@ -153,6 +155,75 @@ class HandoffAndCoordinationTests(unittest.TestCase):
 
     def test_versioned_handoff_template_is_valid(self) -> None:
         self.assertEqual(validate_handoff(self.handoff()), [])
+
+    def test_routing_matrix_accepts_each_authorized_default(self) -> None:
+        defaults = {
+            "coordinator": ("gpt-5.6-sol", "Medium", "read-only"),
+            "product": ("gpt-5.6-sol", "Medium", "read-only"),
+            "architecture": ("gpt-5.6-sol", "Medium", "read-only"),
+            "implementation": ("gpt-5.6-luna", "Low", "workspace-write"),
+            "qa": ("gpt-5.6-sol", "Medium", "read-only"),
+            "reviewer": ("gpt-5.6-sol", "Medium", "read-only"),
+            "knowledge_steward": ("gpt-5.6-luna", "Low", "workspace-write"),
+        }
+        for role, (model, effort, sandbox) in defaults.items():
+            with self.subTest(role=role):
+                value = self.handoff()
+                value["to_role"] = role
+                value["target_model"] = model
+                value["effort"] = effort
+                value["sandbox_mode"] = sandbox
+                self.assertEqual(validate_handoff(value), [])
+
+    def test_routing_requires_explicit_model_effort_and_one_sentence_rationale(self) -> None:
+        for field in ("target_model", "effort", "rationale"):
+            with self.subTest(field=field):
+                value = self.handoff()
+                value.pop(field)
+                self.assertTrue(validate_handoff(value))
+        value = self.handoff()
+        value["rationale"] = "Two sentences. Not allowed."
+        self.assertTrue(validate_handoff(value))
+
+    def test_invalid_model_effort_and_role_pairings_fail(self) -> None:
+        mutations = {
+            "unknown model": {"target_model": "gpt-9.0", "effort": "Low"},
+            "Sol implementation": {"to_role": "implementation", "target_model": "gpt-5.6-sol", "effort": "Medium", "sandbox_mode": "workspace-write"},
+            "Luna reviewer": {"to_role": "reviewer", "target_model": "gpt-5.6-luna", "effort": "Low", "sandbox_mode": "read-only"},
+            "Terra high without rationale": {"to_role": "implementation", "target_model": "gpt-5.6-terra", "effort": "High", "sandbox_mode": "workspace-write", "rationale": "A normal implementation task."},
+            "Reviewer high without risk": {"to_role": "reviewer", "target_model": "gpt-5.6-sol", "effort": "High", "sandbox_mode": "read-only", "rationale": "A normal review task."},
+        }
+        for name, changes in mutations.items():
+            with self.subTest(name=name):
+                value = self.handoff()
+                value.update(changes)
+                self.assertTrue(validate_handoff(value))
+
+    def test_correction_and_reviewer_routing_are_explicit(self) -> None:
+        correction = self.handoff()
+        correction.update({"is_correction": True, "target_model": "gpt-5.6-luna", "effort": "Low"})
+        self.assertEqual(validate_handoff(correction), [])
+        invalid = copy.deepcopy(correction)
+        invalid["target_model"] = "gpt-5.6-sol"
+        invalid["effort"] = "Medium"
+        self.assertTrue(validate_handoff(invalid))
+        reviewer = self.handoff()
+        reviewer.update({"to_role": "reviewer", "target_model": "gpt-5.6-sol", "effort": "Medium", "sandbox_mode": "read-only"})
+        self.assertEqual(validate_handoff(reviewer), [])
+
+    def test_ephemeral_research_is_read_only_and_model_bounded(self) -> None:
+        valid = self.handoff()
+        valid.update({"execution_mode": "ephemeral_research", "sandbox_mode": "read-only", "target_model": "gpt-5.6-luna", "effort": "Low"})
+        self.assertEqual(validate_handoff(valid), [])
+        for name, changes in {
+            "write-capable": {"sandbox_mode": "workspace-write"},
+            "Terra medium": {"target_model": "gpt-5.6-terra", "effort": "Medium"},
+            "Sol without exceptional rationale": {"target_model": "gpt-5.6-sol", "effort": "Medium"},
+        }.items():
+            with self.subTest(name=name):
+                value = copy.deepcopy(valid)
+                value.update(changes)
+                self.assertTrue(validate_handoff(value))
 
     def test_executable_handoff_validation_enforces_every_schema_constraint(self) -> None:
         mutations = {
@@ -295,6 +366,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             self.assertIn(risk_class, coordination)
         self.assertIn("bounded read-only", coordination)
         self.assertIn("cross_task_watchdog_seconds: 25", config)
+        self.assertIn("routing_policy: repository-native-v1", config)
+        self.assertIn("gpt-5.6-luna/Low|gpt-5.6-terra/Low..High", config)
 
 
 class RepositoryStateTests(unittest.TestCase):
@@ -322,6 +395,7 @@ class RepositoryStateTests(unittest.TestCase):
         config = (target / ".agentic-sdlc/config.yaml").read_text(encoding="utf-8")
         self.assertIn('project_name: "Legacy Fixture"', config)
         self.assertIn('session_title_format: "#{issue_number} {role_code} - {issue_title}"', config)
+        self.assertIn("routing_policy: repository-native-v1", config)
         self.assertNotIn("{project_name} #{issue_number}", config)
         again, _, _ = manage_repository.plan(target, "Legacy Fixture")
         self.assertFalse([a for a in again if a.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])

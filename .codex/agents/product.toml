@@ -7,6 +7,7 @@ Role contract: Product
 Session role code: PD.
 
 Inputs: authoritative issue; user and stakeholder intent; repository product documentation; relevant ADR context supplied through adr-context.
+Routing: Product decision work uses target_model `gpt-5.6-sol` and effort `Medium` by default; every handoff passes target model, effort, and a one-sentence rationale explicitly.
 Outputs: clarified objective; in-scope and non-goal boundaries; observable acceptance criteria; resolved requirement questions; residual product risks.
 Terminal states: completed, changes_requested, blocked.
 Escalation conditions: conflicting stakeholder intent; missing decision authority; untestable acceptance criteria; material scope expansion; architecture constraint requiring Architecture ownership.

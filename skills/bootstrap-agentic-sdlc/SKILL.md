@@ -13,4 +13,6 @@ description: Bootstrap Agentic SDLC into a software repository. Use when adoptin
 6. Record managed hashes in `.agentic-sdlc/managed.json`; never edit that state by hand. The applied version is updated only after a conflict-free apply.
 7. Validate that standalone `.codex/agents/*.toml` roles, structured handoffs, ADR routing, durable delivery, and read-only research rules are discoverable. Report changes, preserved files, conflicts, and rollback through version control.
 
+Bootstrap also installs the repository-native model-routing policy. Every durable handoff must explicitly pass `target_model`, `effort`, and a one-sentence `rationale`; use the deterministic matrix in `.agentic-sdlc/config.yaml` and reject implicit/default routing or invalid role/model/effort pairs.
+
 For every new delivery session, use `#<issue number> <role code> - <issue title>` with `CO` Coordinator, `PD` Product, `AR` Architecture, `IM` Implementation, `QA` QA, `RV` Reviewer, or `KS` Knowledge Steward. The complete title is at most 36 Unicode characters. Build the prefix first; if truncation is required, truncate only the issue-title segment and end with one Unicode ellipsis `…`. Reject unknown codes and do not include `project_name`. Apply this prospectively; do not rename existing sessions unless explicitly requested. Do not create a delivery session without an authoritative issue.
