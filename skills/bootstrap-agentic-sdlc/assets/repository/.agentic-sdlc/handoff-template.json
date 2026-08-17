@@ -19,6 +19,7 @@
   "sandbox_mode": "workspace-write",
   "is_correction": false,
   "lifecycle_state": "IMPLEMENTATION_ACTIVE",
+  "lifecycle_event": "IMPLEMENTATION_READY",
   "source_task_key": "issue-1-coordinator",
   "target_task_key": "issue-1-implementation",
   "readiness_evidence": {"commit_sha": null, "pull_request_url": null, "local_gates": "not_run", "ci_status": "not_run", "required_checks": []},

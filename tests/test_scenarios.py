@@ -198,7 +198,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         blocked = self.handoff()
         blocked["lifecycle_state"] = "BLOCKED"
         self.assertTrue(validate_handoff(blocked))
-        blocked["blocked_fallback"] = {"repository": "o/r", "issue_url": "https://github.com/o/r/issues/1", "operation_id": str(uuid4()), "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
+        blocked["blocked_fallback"] = {"repository": "o/r", "issue_or_pr_url": "https://github.com/o/r/issues/1", "operation_id": blocked["operation_id"], "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
         self.assertEqual(validate_handoff(blocked), [])
 
     def test_routing_requires_explicit_model_effort_and_one_sentence_rationale(self) -> None:
@@ -303,7 +303,11 @@ class HandoffAndCoordinationTests(unittest.TestCase):
 
     def test_lifecycle_can_block_when_host_task_control_is_unavailable(self) -> None:
         lifecycle = CoordinatorLifecycle()
-        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.BLOCKED, str(uuid4())), LifecycleState.BLOCKED)
+        operation_id = str(uuid4())
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.BLOCKED, operation_id)
+        fallback = {"repository": "o/r", "issue_or_pr_url": "https://github.com/o/r/issues/1", "operation_id": operation_id, "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.BLOCKED, operation_id, fallback=fallback), LifecycleState.BLOCKED)
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), {})
 
@@ -336,6 +340,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         reviewer.update(
             {
                 "lifecycle_state": "REVIEW_ACTIVE",
+                "lifecycle_event": "REVIEW_ACTIVATE",
                 "to_role": "reviewer",
                 "from_role": "coordinator",
                 "source_task_key": "issue-1-coordinator",
