@@ -426,6 +426,7 @@ class CoordinatorLifecycle:
         self.implementation_key = f"issue-{self.issue_number}-implementation"
         self.reviewer_key = f"issue-{self.issue_number}-reviewer"
         self._artifact: tuple[str, str, str] | None = None
+        self._artifact_revisions: list[tuple[str, str, str]] = []
         self._operations: dict[str, dict[str, Any]] = {}
         self._unknown: str | None = None
 
@@ -453,11 +454,18 @@ class CoordinatorLifecycle:
             if prior.get("intent") == intent and prior.get("terminal"):
                 return
             raise LifecycleTransitionError("operation UUID is already bound to another immutable intent")
-        if self._artifact is not None:
+        if self._unknown is not None:
+            raise LifecycleTransitionError("cannot bind an artifact while delivery reconciliation is pending")
+        if self.state in {LifecycleState.BLOCKED, LifecycleState.HUMAN_MERGE_READY}:
+            raise LifecycleTransitionError("cannot bind an artifact after terminal lifecycle state")
+        if self._artifact is not None and self.state is not LifecycleState.CORRECTION_ACTIVE:
             raise LifecycleTransitionError("delivery artifact is already immutably bound")
+        if self._artifact is None and self.state is not LifecycleState.IMPLEMENTATION_ACTIVE:
+            raise LifecycleTransitionError("initial artifact binding is allowed only before implementation readiness")
         if self.work_item.pull_request_url is not None and (pull_request_url != self.work_item.pull_request_url or commit_sha != self.work_item.commit_sha):
             raise LifecycleTransitionError("binding must exactly match prebound canonical artifact")
         self._artifact = (pull_request_url, commit_sha, operation_id)
+        self._artifact_revisions.append(self._artifact)
         self._operations[operation_id] = {"intent": intent, "state": self.state, "retryable": False, "terminal": True}
 
     def _bound_ready_evidence(self, evidence: dict[str, Any] | None) -> bool:
