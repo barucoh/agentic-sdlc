@@ -149,6 +149,9 @@ class SessionTitleTests(unittest.TestCase):
 
 
 class HandoffAndCoordinationTests(unittest.TestCase):
+    def lifecycle(self) -> CoordinatorLifecycle:
+        return CoordinatorLifecycle(5, {"repository": "o/r", "issue_number": 5, "issue_url": "https://github.com/o/r/issues/5"})
+
     def handoff(self) -> dict:
         return json.loads(
             (ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/handoff-template.json").read_text(
@@ -182,7 +185,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertEqual(cases, 7)
 
     def test_cycle4_direction_identity_and_typed_intent_guards(self) -> None:
-        lifecycle = CoordinatorLifecycle(5)
+        lifecycle = self.lifecycle()
         evidence = {"commit_sha": "e" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-reviewer")
@@ -205,7 +208,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertEqual(validate_handoff(blocked), [])
 
     def test_cycle7_absent_retry_and_canonical_repository_binding(self) -> None:
-        lifecycle = CoordinatorLifecycle(5)
+        lifecycle = self.lifecycle()
         operation_id = str(uuid4())
         lifecycle.observe_delivery_unknown("coordinator", operation_id, LifecycleState.IMPLEMENTATION_READY, None, source_task_key="issue-5-implementation", target_task_key="issue-5-coordinator")
         self.assertEqual(lifecycle.reconcile_delivery("coordinator", operation_id, False), LifecycleState.IMPLEMENTATION_ACTIVE)
@@ -263,7 +266,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 self.assertTrue(validate_handoff(value))
 
     def test_lifecycle_requires_ready_evidence_and_coordinator_ownership(self) -> None:
-        lifecycle = CoordinatorLifecycle()
+        lifecycle = self.lifecycle()
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("implementation", LifecycleState.IMPLEMENTATION_READY, str(uuid4()))
         with self.assertRaises(LifecycleTransitionError):
@@ -281,7 +284,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         )
 
     def test_lifecycle_sequences_review_correction_and_human_gate(self) -> None:
-        lifecycle = CoordinatorLifecycle()
+        lifecycle = self.lifecycle()
         evidence = {"commit_sha": "a" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
         for next_state in (LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE):
             self.assertEqual(lifecycle.transition("coordinator", next_state, str(uuid4()), evidence), next_state)
@@ -293,7 +296,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.HUMAN_MERGE_READY, str(uuid4())), LifecycleState.HUMAN_MERGE_READY)
 
     def test_lifecycle_duplicate_operations_and_unknown_delivery_cannot_blind_activate(self) -> None:
-        lifecycle = CoordinatorLifecycle()
+        lifecycle = self.lifecycle()
         evidence = {"commit_sha": "b" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
         lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
         operation_id = str(uuid4())
@@ -303,7 +306,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("coordinator", LifecycleState.REVIEW_ACCEPTED, operation_id)
 
-        lifecycle = CoordinatorLifecycle()
+        lifecycle = self.lifecycle()
         lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
         unknown_id = str(uuid4())
         self.assertEqual(lifecycle.observe_delivery_unknown("coordinator", unknown_id, LifecycleState.REVIEW_ACTIVE), LifecycleState.DELIVERY_UNKNOWN)
@@ -313,7 +316,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, str(uuid4()), evidence), LifecycleState.REVIEW_ACTIVE)
 
     def test_lifecycle_can_block_when_host_task_control_is_unavailable(self) -> None:
-        lifecycle = CoordinatorLifecycle()
+        lifecycle = self.lifecycle()
         operation_id = str(uuid4())
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("coordinator", LifecycleState.BLOCKED, operation_id)
