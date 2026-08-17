@@ -483,6 +483,15 @@ class CoordinatorLifecycle:
     def _correction_revision_ready(self, next_state: LifecycleState) -> bool:
         return not (next_state is LifecycleState.IMPLEMENTATION_READY and self.state is LifecycleState.CORRECTION_ACTIVE and (self._correction_checkpoint is None or len(self._artifact_revisions) <= self._correction_checkpoint))
 
+    def _apply_transition_intent(self, record: dict[str, Any], next_state: LifecycleState) -> LifecycleState:
+        intent = json.loads(record["intent"])
+        if next_state is LifecycleState.CORRECTION_ACTIVE:
+            self._correction_checkpoint = intent["correction_checkpoint"]
+        self.state = next_state
+        record["state"] = next_state
+        record["retryable"] = False
+        return self.state
+
     def transition(
         self,
         actor: str,
@@ -513,7 +522,8 @@ class CoordinatorLifecycle:
         event = event or {LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE", LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE", LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "HUMAN_MERGE_READY", LifecycleState.BLOCKED: "BLOCKED"}.get(next_state)
         if not self._direction(self.state, next_state, source_task_key, target_task_key, event):
             raise LifecycleTransitionError("unauthorized lifecycle event direction")
-        intent = json.dumps({"state": self.state.value, "next": next_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback}, sort_keys=True, separators=(",", ":"))
+        checkpoint = len(self._artifact_revisions) if next_state is LifecycleState.CORRECTION_ACTIVE else None
+        intent = json.dumps({"state": self.state.value, "next": next_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback, "correction_checkpoint": checkpoint}, sort_keys=True, separators=(",", ":"))
         if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._bound_ready_evidence(evidence):
             raise LifecycleTransitionError("lifecycle transition requires canonical passed readiness evidence")
         if not self._correction_revision_ready(next_state):
@@ -523,9 +533,7 @@ class CoordinatorLifecycle:
             if prior["intent"] != intent:
                 raise LifecycleTransitionError("operation ID cannot be reused for another transition")
             if prior.get("retryable"):
-                prior["retryable"] = False
-                prior["state"] = next_state
-                self.state = next_state
+                return self._apply_transition_intent(prior, next_state)
             if prior.get("terminal"):
                 return self.state
             return self.state
@@ -535,11 +543,9 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError(f"invalid lifecycle transition: {self.state.value} -> {next_state.value}")
         if next_state is LifecycleState.REVIEW_ACTIVE and self.state is not LifecycleState.IMPLEMENTATION_READY:
             raise LifecycleTransitionError("Reviewer activates only from IMPLEMENTATION_READY")
-        self._operations[operation_id] = {"intent": intent, "state": next_state, "retryable": False, "terminal": next_state is LifecycleState.HUMAN_MERGE_READY}
-        if next_state is LifecycleState.CORRECTION_ACTIVE:
-            self._correction_checkpoint = len(self._artifact_revisions)
-        self.state = next_state
-        return self.state
+        record = {"intent": intent, "state": self.state, "retryable": False, "terminal": next_state is LifecycleState.HUMAN_MERGE_READY}
+        self._operations[operation_id] = record
+        return self._apply_transition_intent(record, next_state)
 
     def observe_delivery_unknown(self, actor: str, operation_id: str, intended_state: LifecycleState, evidence: dict[str, Any] | None = None, *, source_task_key: str | None = None, target_task_key: str | None = None, event: str | None = None, fallback: dict[str, Any] | None = None) -> LifecycleState:
         if actor != "coordinator":
@@ -567,7 +573,8 @@ class CoordinatorLifecycle:
         event = event or {LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE", LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE", LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.BLOCKED: "BLOCKED"}.get(intended_state)
         if not self._direction(self.state, intended_state, source_task_key, target_task_key, event):
             raise LifecycleTransitionError("unknown delivery requires an allowed exact lifecycle direction")
-        intent = json.dumps({"state": self.state.value, "next": intended_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback}, sort_keys=True, separators=(",", ":"))
+        checkpoint = len(self._artifact_revisions) if intended_state is LifecycleState.CORRECTION_ACTIVE else None
+        intent = json.dumps({"state": self.state.value, "next": intended_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback, "correction_checkpoint": checkpoint}, sort_keys=True, separators=(",", ":"))
         self._operations[operation_id] = {"intent": intent, "state": self.state, "retryable": False, "terminal": False, "intended": intended_state}
         self._unknown = operation_id
         self.state = LifecycleState.DELIVERY_UNKNOWN
@@ -588,7 +595,10 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError("APPLIED reconciliation requires valid readiness evidence")
         if applied and not self._correction_revision_ready(intended_state):
             raise LifecycleTransitionError("APPLIED reconciliation requires a later correction artifact revision")
-        self.state = intended_state if applied else resume_state
+        if applied:
+            self._apply_transition_intent(record, intended_state)
+        else:
+            self.state = resume_state
         self._unknown = None
         record["retryable"] = not applied
         record["state"] = self.state
