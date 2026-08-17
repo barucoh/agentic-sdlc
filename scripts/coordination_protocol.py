@@ -394,6 +394,8 @@ class CanonicalWorkItem:
             raise LifecycleTransitionError("canonical work item requires its authoritative GitHub issue URL")
         pr = value.get("pull_request_url")
         sha = value.get("commit_sha")
+        if (pr is None) != (sha is None):
+            raise LifecycleTransitionError("canonical work item requires PR URL and commit SHA together")
         if pr is not None and not re.fullmatch(r"https://github\.com/" + re.escape(value["repository"]) + r"/pull/[1-9][0-9]*", pr):
             raise LifecycleTransitionError("canonical work item has an invalid PR URL")
         if sha is not None and not re.fullmatch(r"[0-9a-f]{40}", sha):
@@ -424,7 +426,6 @@ class CoordinatorLifecycle:
         self.implementation_key = f"issue-{self.issue_number}-implementation"
         self.reviewer_key = f"issue-{self.issue_number}-reviewer"
         self._artifact: tuple[str, str, str] | None = None
-        self._binding_operation: str | None = None
         self._operations: dict[str, dict[str, Any]] = {}
         self._unknown: str | None = None
 
@@ -446,13 +447,18 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError("artifact binding requires a UUID, exact PR URL, and exact SHA")
         if not re.fullmatch(r"https://github\.com/" + re.escape(self.work_item.repository) + r"/pull/[1-9][0-9]*", pull_request_url) or not re.fullmatch(r"[0-9a-f]{40}", commit_sha):
             raise LifecycleTransitionError("artifact binding must match the canonical repository")
-        proposed = (operation_id, pull_request_url, commit_sha)
-        if self._artifact is not None:
-            if proposed == (self._binding_operation, self._artifact[0], self._artifact[1]):
+        intent = json.dumps({"action": "BIND_DELIVERY_ARTIFACT", "issue": self.work_item.as_dict(), "pr": pull_request_url, "sha": commit_sha}, sort_keys=True, separators=(",", ":"))
+        prior = self._operations.get(operation_id)
+        if prior is not None:
+            if prior.get("intent") == intent and prior.get("terminal"):
                 return
+            raise LifecycleTransitionError("operation UUID is already bound to another immutable intent")
+        if self._artifact is not None:
             raise LifecycleTransitionError("delivery artifact is already immutably bound")
-        self._binding_operation = operation_id
+        if self.work_item.pull_request_url is not None and (pull_request_url != self.work_item.pull_request_url or commit_sha != self.work_item.commit_sha):
+            raise LifecycleTransitionError("binding must exactly match prebound canonical artifact")
         self._artifact = (pull_request_url, commit_sha, operation_id)
+        self._operations[operation_id] = {"intent": intent, "state": self.state, "retryable": False, "terminal": True}
 
     def _bound_ready_evidence(self, evidence: dict[str, Any] | None) -> bool:
         return bool(self._artifact and self._ready_evidence(evidence, {**self.work_item.as_dict(), "pull_request_url": self._artifact[0], "commit_sha": self._artifact[1]}))
