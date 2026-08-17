@@ -277,7 +277,7 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
     if state == LifecycleState.BLOCKED.value:
         fallback = value.get("blocked_fallback")
         fields = ("repository", "issue_or_pr_url", "operation_id", "objective", "expected_output", "evidence", "next_owner")
-        if not isinstance(fallback, dict) or any(not isinstance(fallback.get(field), str) or not fallback[field].strip() for field in fields) or fallback.get("operation_id") != value.get("operation_id") or not re.fullmatch(r"[^/\s]+/[^/\s]+", str(fallback.get("repository"))) or not re.match(r"^https://", str(fallback.get("issue_or_pr_url"))):
+        if not isinstance(fallback, dict) or any(not isinstance(fallback.get(field), str) or not fallback[field].strip() for field in fields) or fallback.get("operation_id") != value.get("operation_id") or not _valid_repository(fallback.get("repository")) or not re.match(r"^https://github\.com/" + re.escape(fallback.get("repository", "")) + r"/(issues|pull)/[1-9][0-9]*$", str(fallback.get("issue_or_pr_url"))):
             errors.append("BLOCKED requires a reconstructible fallback")
     return errors
 
@@ -411,6 +411,8 @@ class CoordinatorLifecycle:
         if next_state is not LifecycleState.BLOCKED and not self._direction(self.state, next_state, source_task_key, target_task_key, event):
             raise LifecycleTransitionError("unauthorized lifecycle event direction")
         intent = json.dumps({"state": self.state.value, "next": next_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence}, sort_keys=True, separators=(",", ":"))
+        if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(evidence, self.work_item):
+            raise LifecycleTransitionError("lifecycle transition requires canonical passed readiness evidence")
         prior = self._operations.get(operation_id)
         if prior is not None:
             if prior["intent"] != intent:
@@ -424,8 +426,6 @@ class CoordinatorLifecycle:
             return self.state
         if self.state in {LifecycleState.DELIVERY_UNKNOWN, LifecycleState.BLOCKED, LifecycleState.HUMAN_MERGE_READY}:
             raise LifecycleTransitionError(f"cannot transition from {self.state.value}")
-        if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(evidence, self.work_item):
-            raise LifecycleTransitionError("IMPLEMENTATION_READY requires commit SHA, PR URL, local gates, and CI status")
         if next_state not in self._TRANSITIONS.get(self.state, set()) and next_state is not LifecycleState.BLOCKED:
             raise LifecycleTransitionError(f"invalid lifecycle transition: {self.state.value} -> {next_state.value}")
         if next_state is LifecycleState.REVIEW_ACTIVE and self.state is not LifecycleState.IMPLEMENTATION_READY:

@@ -204,6 +204,14 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         blocked["blocked_fallback"] = {"repository": "o/r", "issue_or_pr_url": "https://github.com/o/r/issues/1", "operation_id": blocked["operation_id"], "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
         self.assertEqual(validate_handoff(blocked), [])
 
+    def test_cycle7_absent_retry_and_canonical_repository_binding(self) -> None:
+        lifecycle = CoordinatorLifecycle(5)
+        operation_id = str(uuid4())
+        lifecycle.observe_delivery_unknown("coordinator", operation_id, LifecycleState.IMPLEMENTATION_READY, None, source_task_key="issue-5-implementation", target_task_key="issue-5-coordinator")
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", operation_id, False), LifecycleState.IMPLEMENTATION_ACTIVE)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, operation_id, None, source_task_key="issue-5-implementation", target_task_key="issue-5-coordinator")
+
     def test_routing_requires_explicit_model_effort_and_one_sentence_rationale(self) -> None:
         for field in ("target_model", "effort", "rationale"):
             with self.subTest(field=field):
