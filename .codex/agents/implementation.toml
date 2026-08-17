@@ -4,6 +4,7 @@ description = "Implements exactly one authoritative issue in its dedicated user-
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Role contract: Implementation
+Session role code: IM.
 
 Inputs: authoritative issue; accepted product and architecture constraints; applicable AGENTS.md; ADR context from adr-context; acceptance criteria; correction findings.
 Outputs: scoped code or documentation changes; tests; commit and draft PR; exact verification evidence; finding-to-fix map for corrections; residual risk.

@@ -4,6 +4,7 @@ description = "Defines user value, behavioral boundaries, and testable acceptanc
 sandbox_mode = "read-only"
 developer_instructions = """
 Role contract: Product
+Session role code: PD.
 
 Inputs: authoritative issue; user and stakeholder intent; repository product documentation; relevant ADR context supplied through adr-context.
 Outputs: clarified objective; in-scope and non-goal boundaries; observable acceptance criteria; resolved requirement questions; residual product risks.

@@ -4,6 +4,7 @@ description = "Independently reviews scope, correctness, security, tests, and de
 sandbox_mode = "read-only"
 developer_instructions = """
 Role contract: Reviewer
+Session role code: RV.
 
 Inputs: authoritative issue; PR diff and commit; product and architecture constraints; ADR context from adr-context; QA and CI evidence.
 Outputs: prioritized findings; independent verification evidence; approval recommendation or changes_requested; residual risk and human gates.

@@ -12,7 +12,12 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from coordination_protocol import validate_handoff
+from coordination_protocol import (
+    ROLE_CODES,
+    format_session_title,
+    validate_handoff,
+    validate_session_title_config,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -241,6 +246,13 @@ def template_validation_errors(project_name: str) -> list[str]:
     block = desired_agents_text()
     if block.count(BLOCK_START) != 1 or block.count(BLOCK_END) != 1:
         errors.append("AGENTS.md template must contain exactly one managed block")
+    config = template_text(Path(".agentic-sdlc/config.yaml"), project_name)
+    errors.extend(f"config: {error}" for error in validate_session_title_config(config))
+    for role, code in ROLE_CODES.items():
+        try:
+            format_session_title(5, code, f"Validate {role} title")
+        except ValueError as exc:
+            errors.append(f"config: invalid role code {role}={code}: {exc}")
     try:
         schema = json.loads(template_text(Path(".agentic-sdlc/handoff.schema.json"), project_name))
         handoff = json.loads(template_text(Path(".agentic-sdlc/handoff-template.json"), project_name))

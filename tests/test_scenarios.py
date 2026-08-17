@@ -17,9 +17,14 @@ from coordination_protocol import (  # noqa: E402
     DeliveryState,
     Observation,
     OperationLedger,
+    ROLE_CODES,
     Reconciliation,
+    SESSION_TITLE_MAX_CHARACTERS,
     TargetOperation,
+    format_session_title,
+    session_title_for_role,
     validate_handoff,
+    validate_session_title_config,
 )
 import manage_repository  # noqa: E402
 
@@ -76,6 +81,66 @@ class RoleContractTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertIn("adr-context", text)
             self.assertNotIn("Read only `docs/decisions/INDEX.md`", text)
+
+
+class SessionTitleTests(unittest.TestCase):
+    def test_all_seven_role_codes_are_stable_and_complete(self) -> None:
+        self.assertEqual(
+            ROLE_CODES,
+            {
+                "coordinator": "CO",
+                "product": "PD",
+                "architecture": "AR",
+                "implementation": "IM",
+                "qa": "QA",
+                "reviewer": "RV",
+                "knowledge_steward": "KS",
+            },
+        )
+        for role, code in ROLE_CODES.items():
+            with self.subTest(role=role):
+                self.assertEqual(session_title_for_role(5, role, "Short title"), f"#5 {code} - Short title")
+
+    def test_short_title_is_not_padded_or_truncated(self) -> None:
+        self.assertEqual(format_session_title(5, "IM", "Fix bug"), "#5 IM - Fix bug")
+
+    def test_exact_boundary_is_preserved_without_ellipsis(self) -> None:
+        issue_title = "x" * 28
+        title = format_session_title(5, "RV", issue_title)
+        self.assertEqual(len(title), SESSION_TITLE_MAX_CHARACTERS)
+        self.assertEqual(title, f"#5 RV - {issue_title}")
+        self.assertFalse(title.endswith("…"))
+
+    def test_overlong_title_truncates_only_issue_title(self) -> None:
+        title = format_session_title(5, "IM", "x" * 29)
+        self.assertEqual(title, f"#5 IM - {'x' * 27}…")
+        self.assertEqual(len(title), SESSION_TITLE_MAX_CHARACTERS)
+
+    def test_unicode_title_uses_character_length_not_encoded_bytes(self) -> None:
+        title = format_session_title(123, "PD", "תכנון🚀" * 20)
+        self.assertLessEqual(len(title), SESSION_TITLE_MAX_CHARACTERS)
+        self.assertTrue(title.startswith("#123 PD - "))
+        self.assertTrue(title.endswith("…"))
+        self.assertNotIn("�", title.encode("utf-8").decode("utf-8"))
+
+    def test_truncation_ends_with_one_unicode_ellipsis(self) -> None:
+        title = format_session_title(5, "AR", ("a" * 27) + ("…" * 10))
+        self.assertTrue(title.endswith("…"))
+        self.assertFalse(title.endswith("……"))
+        self.assertLessEqual(len(title), SESSION_TITLE_MAX_CHARACTERS)
+
+    def test_unknown_role_code_and_role_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unknown role code"):
+            format_session_title(5, "XX", "Issue title")
+        with self.assertRaisesRegex(ValueError, "unknown role"):
+            session_title_for_role(5, "scribe", "Issue title")
+
+    def test_managed_config_matches_executable_title_authority(self) -> None:
+        config_path = ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/config.yaml"
+        config = config_path.read_text(encoding="utf-8")
+        self.assertEqual(validate_session_title_config(config), [])
+        invalid = config.replace("  reviewer: RV", "  reviewer: XX")
+        self.assertTrue(validate_session_title_config(invalid))
 
 
 class HandoffAndCoordinationTests(unittest.TestCase):
@@ -254,6 +319,10 @@ class RepositoryStateTests(unittest.TestCase):
         self.assertIn(("delete", ".codex/config.toml"), classifications)
         self.assertFalse((target / ".codex/config.toml").exists())
         self.assertEqual(tomllib.loads((target / ".codex/agents/coordinator.toml").read_text(encoding="utf-8"))["name"], "coordinator")
+        config = (target / ".agentic-sdlc/config.yaml").read_text(encoding="utf-8")
+        self.assertIn('project_name: "Legacy Fixture"', config)
+        self.assertIn('session_title_format: "#{issue_number} {role_code} - {issue_title}"', config)
+        self.assertNotIn("{project_name} #{issue_number}", config)
         again, _, _ = manage_repository.plan(target, "Legacy Fixture")
         self.assertFalse([a for a in again if a.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
 

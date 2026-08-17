@@ -7,6 +7,12 @@ GitHub issues, pull requests, commits, review comments, ADRs, and committed cano
 
 Any file-producing, durable-artifact-producing, decision-heavy, release, high-importance, or risk-bearing task uses one authoritative issue, one user-visible task, one worktree, one branch, and one pull request. Ephemeral subagents are limited to bounded read-only research, discovery, log analysis, documentation lookup, or evidence gathering. They must use a read-only sandbox, make no file or external-state changes, and return concise evidence.
 
+## Session titles
+
+Name every new user-visible task `#<issue number> <role code> - <issue title>`. The stable codes are `CO` Coordinator, `PD` Product, `AR` Architecture, `IM` Implementation, `QA` QA, `RV` Reviewer, and `KS` Knowledge Steward. Reject unknown codes rather than inventing one.
+
+The complete title may contain at most 36 Unicode characters, including the prefix, spaces, hyphen, and ellipsis. Build `#<issue_number> <role_code> - ` first. If the complete title is too long, truncate only the issue-title segment and end it with one Unicode ellipsis `…`. Do not include `project_name`; it remains available for other repository metadata. Apply this rule prospectively. Repository migrations do not rename existing sessions unless a user explicitly requests it.
+
 ## Cross-task operation protocol
 
 1. Generate one UUID operation ID before every cross-task action and include it in the versioned handoff.

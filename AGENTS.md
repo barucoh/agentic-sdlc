@@ -1,7 +1,7 @@
 # Agentic SDLC repository rules
 
 - Work from a GitHub issue in a dedicated branch and worktree.
-- Name issue-delivery sessions `<project name> #<issue number> - <issue name>`.
+- Name new issue-delivery sessions `#<issue number> <role code> - <issue title>` using the canonical two-character role code and a maximum full title length of 36 Unicode characters.
 - Keep each pull request scoped to one issue and include verification evidence.
 - Never push directly to `main`; only `barucoh` may approve and merge.
 - Run `python scripts/validate.py` before publishing changes.
@@ -13,7 +13,7 @@
 ## Agentic SDLC
 
 - Work from an authoritative issue in a dedicated task, branch, and worktree.
-- Name delivery sessions `<project name> #<issue number> - <issue name>`.
+- Name new delivery sessions `#<issue number> <role code> - <issue title>` with role codes `CO`, `PD`, `AR`, `IM`, `QA`, `RV`, and `KS`; cap the full title at 36 Unicode characters by truncating only the issue title and ending it with one `…`. Reject unknown role codes.
 - Use Coordinator, Product, Architecture, Implementation, QA, Reviewer, and Knowledge Steward roles through `.codex/agents/`.
 - Any file-producing, durable-artifact-producing, decision-heavy, release, high-importance, or risk-bearing task must use one issue-backed user-visible task, worktree, branch, and PR.
 - Ephemeral subagents are limited to bounded read-only research, discovery, documentation lookup, log analysis, and evidence gathering; they may not write files or external durable state.

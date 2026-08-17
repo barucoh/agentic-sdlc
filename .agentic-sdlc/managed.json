@@ -1,20 +1,20 @@
 {
   "files": {
-    ".agentic-sdlc/config.yaml": "61daa4939baf274bdb3e5542b3adad225e6c5084ae73e19227da08d3b2b35bd5",
+    ".agentic-sdlc/config.yaml": "efba6a458e4d82306ee60e5804a0b39f22599fcbe46432fec415f2fe96ed4460",
     ".agentic-sdlc/handoff-template.json": "876b5b8794aab61c30123c95cb47cd73beb6428079f4f5648cb38afafb78a334",
     ".agentic-sdlc/handoff.schema.json": "56a0e5bb02fe1651988472c6ca9c7f975c61379659037c1a54672993ba7d20a3",
-    ".codex/agents/architecture.toml": "c6765666b60c7087941716c4d198fb2ac2264ffef3bc65a659066ff25c3d821c",
-    ".codex/agents/coordinator.toml": "ce58ed2d3da962d35c7265670cb498b36c2e30e14a51ae1f92ecadb77d7c4329",
-    ".codex/agents/implementation.toml": "704aa98911df091f86851cc5a59fd8111f34f31bf7af339ed1348cb5669c853e",
-    ".codex/agents/knowledge_steward.toml": "b700e56ba03661c5dae55cbe85023055c93d5bd831cea430a464c0c960389b86",
-    ".codex/agents/product.toml": "ac1103e28d340fa6d7593ab5fb4918a2b13ddd610e71bb54df5721bece5994dc",
-    ".codex/agents/qa.toml": "3e77df88d6bcd2d4b110db9333a10ffbf1d7ce354f9d129208efaca4476f44f0",
-    ".codex/agents/reviewer.toml": "17f1ae8d61d82f7b9142e46f1882c6d8296c82e8ca1d8fe84c3ebbf43df8ecba",
-    "docs/agentic-sdlc/coordination.md": "c94b3375cca94642c183faec1049d3fe4c309ff492db3bcbebef89faa9dfd1a4",
-    "docs/agentic-sdlc/role-contracts.md": "79e85d24def6d039edd5f72192adeb7ce0953e3260663f77da737ad49faea9c2"
+    ".codex/agents/architecture.toml": "ef59e51cb75505bdf42bce2a68c7cdefccbc7a1a40351c328afc7d92e6ccd80f",
+    ".codex/agents/coordinator.toml": "9c5fc9a347ade214002159abddaa58c601465dea7bc03bef9bdd969c6b58e5bd",
+    ".codex/agents/implementation.toml": "8283767848dda1d38e1ebcd8107a61d4b0b76ae2fd2158fd5c7f12bad4ec31a3",
+    ".codex/agents/knowledge_steward.toml": "b0cad8c18813a1c31019a9f4be486392e495ef809b82654dc2bc8276131870ee",
+    ".codex/agents/product.toml": "f921ad8176e0acc304cabd7e1467abd45d1e6efa6a201d99ceeb20262b02f392",
+    ".codex/agents/qa.toml": "71e81e3260ae85fe37098ee9d5fedf7c1423ef7a02ecfcefefcc057229a57d33",
+    ".codex/agents/reviewer.toml": "bcb1b6df7cf4901e6ebcb088e978644ee24f2e81ce19b33b9a888537da42c312",
+    "docs/agentic-sdlc/coordination.md": "30e8186cabd2c607e54778999c754571aaa5e67d62ae335621263453f9d5ccc9",
+    "docs/agentic-sdlc/role-contracts.md": "362f08eb455a4f62f2b44b3ef9bb20a1c14ca17fe41eb44fae2e71208007b9da"
   },
   "managed_blocks": {
-    "AGENTS.md": "d43fc4c3aba84e0e880fee9f6264b25e60b2a59b8dd46cbf1ae523f74a7110c3"
+    "AGENTS.md": "5f301a95cf9de51e8bdebb6623e6f5f17369730cca6e587d49b5baea5c37fc52"
   },
   "plugin_version": "0.3.0",
   "project_name": "Agentic SDLC",

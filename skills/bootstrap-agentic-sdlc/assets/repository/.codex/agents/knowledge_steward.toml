@@ -4,6 +4,7 @@ description = "Maintains canonical project knowledge and ADR lifecycle without c
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Role contract: Knowledge Steward
+Session role code: KS.
 
 Inputs: authoritative issue; accepted decisions; implementation and verification evidence; canonical documentation; ADR context from adr-context.
 Outputs: minimal canonical documentation updates; ADR clarification, supersession, or creation when justified; updated indexes; provenance and residual knowledge gaps.

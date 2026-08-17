@@ -44,6 +44,71 @@ SUPPORTED_SCHEMA_KEYWORDS = {
     "items",
     "uniqueItems",
 }
+SESSION_TITLE_FORMAT = "#{issue_number} {role_code} - {issue_title}"
+SESSION_TITLE_MAX_CHARACTERS = 36
+ROLE_CODES = {
+    "coordinator": "CO",
+    "product": "PD",
+    "architecture": "AR",
+    "implementation": "IM",
+    "qa": "QA",
+    "reviewer": "RV",
+    "knowledge_steward": "KS",
+}
+
+
+def format_session_title(issue_number: int, role_code: str, issue_title: str) -> str:
+    """Build the canonical prospective session title using Unicode code points."""
+
+    if isinstance(issue_number, bool) or not isinstance(issue_number, int) or issue_number < 1:
+        raise ValueError("issue number must be a positive integer")
+    if role_code not in ROLE_CODES.values():
+        raise ValueError(f"unknown role code: {role_code!r}")
+    if not isinstance(issue_title, str) or not issue_title:
+        raise ValueError("issue title must be a non-empty string")
+
+    prefix = f"#{issue_number} {role_code} - "
+    complete = prefix + issue_title
+    if len(complete) <= SESSION_TITLE_MAX_CHARACTERS:
+        return complete
+
+    title_budget = SESSION_TITLE_MAX_CHARACTERS - len(prefix)
+    if title_budget < 1:
+        raise ValueError("issue number leaves no room for the issue-title segment")
+    visible_title = issue_title[: title_budget - 1].rstrip("…")
+    return prefix + visible_title + "…"
+
+
+def session_title_for_role(issue_number: int, role: str, issue_title: str) -> str:
+    try:
+        role_code = ROLE_CODES[role]
+    except KeyError as exc:
+        raise ValueError(f"unknown role: {role!r}") from exc
+    return format_session_title(issue_number, role_code, issue_title)
+
+
+def validate_session_title_config(config_text: str) -> list[str]:
+    """Validate the managed YAML subset without adding a YAML dependency."""
+
+    errors: list[str] = []
+    expected_format = f"session_title_format: {json.dumps(SESSION_TITLE_FORMAT)}"
+    if expected_format not in config_text.splitlines():
+        errors.append(f"session_title_format must be {SESSION_TITLE_FORMAT!r}")
+    expected_maximum = f"session_title_max_characters: {SESSION_TITLE_MAX_CHARACTERS}"
+    if expected_maximum not in config_text.splitlines():
+        errors.append(f"session_title_max_characters must be {SESSION_TITLE_MAX_CHARACTERS}")
+
+    match = re.search(r"(?m)^role_codes:\n((?:  [a-z_]+: [A-Z]{2}\n)+)", config_text)
+    if match is None:
+        errors.append("role_codes must be a mapping of role names to two-character codes")
+    else:
+        configured = {}
+        for line in match.group(1).splitlines():
+            role, code = line.strip().split(": ", 1)
+            configured[role] = code
+        if configured != ROLE_CODES:
+            errors.append(f"role_codes must equal {ROLE_CODES!r}")
+    return errors
 
 
 class DeliveryState(str, Enum):

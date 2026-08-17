@@ -9,7 +9,7 @@ The repository migration first reports a deterministic dry run. It updates only 
 
 The v0.3.0 migration recognizes canonical v0.2.0 generated agent files, converts them to current standalone `.codex/agents/*.toml` contracts, and removes only the exact obsolete generated `.codex/config.toml` role registry. A customized legacy registry stops as a conflict; unrelated project-owned `.codex/config.toml` content is preserved.
 
-Existing sessions are not renamed automatically. New session policies apply prospectively unless the user explicitly requests a rename audit.
+Existing sessions are not renamed automatically. The canonical `#<issue number> <role code> - <issue title>` policy applies prospectively unless the user explicitly requests a rename audit; repository migrations never infer or rewrite task titles.
 
 This repository dogfoods its own releases. A release pull request must bump both the plugin manifest and repository configuration to the same version. CI accepts that explicit release-candidate state; after the owner merges it, release automation publishes the matching stable tag. Automation never receives pull-request approval or merge authority.
 

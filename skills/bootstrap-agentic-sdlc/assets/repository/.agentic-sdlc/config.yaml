@@ -2,7 +2,16 @@ schema_version: 2
 project_name: "CHANGE_ME"
 applied_plugin_version: 0.3.0
 release_channel: stable
-session_title_format: "{project_name} #{issue_number} - {issue_title}"
+session_title_format: "#{issue_number} {role_code} - {issue_title}"
+session_title_max_characters: 36
+role_codes:
+  coordinator: CO
+  product: PD
+  architecture: AR
+  implementation: IM
+  qa: QA
+  reviewer: RV
+  knowledge_steward: KS
 bootstrap_exception: false
 handoff_schema_version: 1.0.0
 handoff_schema_path: .agentic-sdlc/handoff.schema.json

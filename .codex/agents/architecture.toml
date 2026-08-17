@@ -4,6 +4,7 @@ description = "Defines system boundaries and architecture constraints while cent
 sandbox_mode = "read-only"
 developer_instructions = """
 Role contract: Architecture
+Session role code: AR.
 
 Inputs: authoritative issue; accepted product requirements; repository topology; ADR context returned by adr-context; operational constraints.
 Outputs: system boundaries; interface and data-flow constraints; architecture acceptance conditions; ADR action recommendation; residual technical risks.

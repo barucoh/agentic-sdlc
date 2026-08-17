@@ -6,7 +6,14 @@ import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from coordination_protocol import validate_handoff
+from coordination_protocol import (
+    ROLE_CODES,
+    SESSION_TITLE_FORMAT,
+    SESSION_TITLE_MAX_CHARACTERS,
+    format_session_title,
+    validate_handoff,
+    validate_session_title_config,
+)
 import manage_repository
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,6 +60,7 @@ for path in required_files:
         errors.append(f"missing template: {path.relative_to(ROOT)}")
 
 config = (ROOT / ".agentic-sdlc/config.yaml").read_text(encoding="utf-8")
+errors.extend(f"invalid self-hosted session-title config: {error}" for error in validate_session_title_config(config))
 if "bootstrap_exception: false" in config and "applied_plugin_version: bootstrap" in config:
     errors.append("non-bootstrap configuration cannot use bootstrap version")
 applied_version = next(
@@ -100,8 +108,19 @@ for path in sorted(agent_root.glob("*.toml")):
     for section in contract_sections:
         if section not in value.get("developer_instructions", ""):
             errors.append(f"agent contract missing {section} in {path.relative_to(ROOT)}")
+    role_name = value.get("name")
+    if role_name in ROLE_CODES and f"Session role code: {ROLE_CODES[role_name]}." not in value.get("developer_instructions", ""):
+        errors.append(f"agent contract has incorrect session role code in {path.relative_to(ROOT)}")
 if role_names != expected_roles:
     errors.append(f"agent roles differ: expected {sorted(expected_roles)}, found {sorted(str(x) for x in role_names)}")
+if set(ROLE_CODES) != expected_roles or len(set(ROLE_CODES.values())) != len(expected_roles):
+    errors.append("session role codes must map uniquely to all seven roles")
+for role_name, role_code in ROLE_CODES.items():
+    title = format_session_title(5, role_code, f"Validate {role_name} session title behavior")
+    if len(title) > SESSION_TITLE_MAX_CHARACTERS or not title.startswith(f"#5 {role_code} - "):
+        errors.append(f"invalid canonical title behavior for {role_name}")
+if SESSION_TITLE_FORMAT != "#{issue_number} {role_code} - {issue_title}":
+    errors.append("canonical session-title format changed unexpectedly")
 if (template_root / ".codex/config.toml").exists():
     errors.append("generated repository must not use obsolete .codex/config.toml role registry")
 
