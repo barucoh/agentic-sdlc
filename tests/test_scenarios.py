@@ -204,7 +204,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         blocked = self.handoff()
         blocked.update({"lifecycle_state": "BLOCKED", "lifecycle_event": "BLOCKED", "to_role": "coordinator", "source_task_key": "issue-1-coordinator", "target_task_key": "issue-1-coordinator", "target_model": "gpt-5.6-sol", "effort": "Medium", "sandbox_mode": "read-only"})
         self.assertTrue(validate_handoff(blocked))
-        blocked["blocked_fallback"] = {"repository": "o/r", "issue_or_pr_url": "https://github.com/o/r/issues/1", "operation_id": blocked["operation_id"], "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
+        blocked["blocked_fallback"] = {"repository": "OWNER/REPOSITORY", "issue_or_pr_url": "https://github.com/OWNER/REPOSITORY/issues/1", "operation_id": blocked["operation_id"], "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
         self.assertEqual(validate_handoff(blocked), [])
 
     def test_cycle7_absent_retry_and_canonical_repository_binding(self) -> None:
@@ -342,6 +342,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 "work_item": {
                     **ready["work_item"],
                     "repository": "o/r",
+                    "issue_url": "https://github.com/o/r/issues/1",
                     "pull_request_url": "https://github.com/o/r/pull/6",
                     "commit_sha": "c" * 40,
                 },
@@ -366,6 +367,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 "work_item": {
                     **reviewer["work_item"],
                     "repository": "o/r",
+                    "issue_url": "https://github.com/o/r/issues/1",
                     "pull_request_url": "https://github.com/o/r/pull/6",
                     "commit_sha": "d" * 40,
                 },

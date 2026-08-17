@@ -266,6 +266,10 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
     work_item = value.get("work_item", {})
     evidence = [str(item).lower() for item in value.get("evidence", [])]
     errors: list[str] = []
+    try:
+        canonical_work_item = CanonicalWorkItem.from_value(work_item)
+    except LifecycleTransitionError as exc:
+        return [str(exc)]
     issue = work_item.get("issue_number")
     try:
         nxt = LifecycleState(state)
@@ -301,7 +305,7 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
         errors.append("HUMAN_MERGE_READY requires completed non-human gates")
     if state == LifecycleState.BLOCKED.value:
         fallback = value.get("blocked_fallback")
-        if canonicalize_and_validate_fallback(fallback, value.get("operation_id", "")) is None:
+        if canonicalize_and_validate_fallback(fallback, value.get("operation_id", ""), canonical_work_item) is None:
             errors.append("BLOCKED requires a reconstructible fallback")
     return errors
 
@@ -455,10 +459,9 @@ class CoordinatorLifecycle:
             if fallback is None or fallback["repository"] != self.work_item.repository:
                 raise LifecycleTransitionError("BLOCKED requires a valid reconstructible fallback")
             probe = {"lifecycle_state": "BLOCKED", "operation_id": operation_id, "blocked_fallback": fallback}
-            fallback_errors = validate_lifecycle_handoff({**json.loads(json.dumps({"schema_version":"1.0.0","operation_id":operation_id,"from_role":"coordinator","to_role":"coordinator","work_item":{"repository":"o/r","issue_number":self.issue_number,"issue_url":"https://github.com/o/r/issues/1","title":"blocked"},"target_model":"gpt-5.6-sol","effort":"Medium","rationale":"A bounded implementation task.","execution_mode":"durable","sandbox_mode":"read-only","is_correction":False,"lifecycle_state":"BLOCKED","lifecycle_event":"BLOCKED","source_task_key":self.coordinator_key,"target_task_key":self.coordinator_key,"readiness_evidence":{"commit_sha":None,"pull_request_url":None,"local_gates":"not_run","ci_status":"not_run","required_checks":[]},"objective":"Recover","inputs":["x"],"constraints":["x"],"adrs":["x"],"acceptance_criteria":["x"],"outputs":["x"],"dependencies":["x"],"escalation":["x"],"evidence":["x"],"residual_risk":["x"],"terminal_state":"blocked","blocked_fallback":fallback})), **probe})
-            if fallback_errors:
-                raise LifecycleTransitionError("BLOCKED requires a valid reconstructible fallback")
-        if source_task_key is None or target_task_key is None:
+        if (source_task_key is None) != (target_task_key is None):
+            raise LifecycleTransitionError("source and target logical task keys must be supplied together")
+        if source_task_key is None:
             default_event = {LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE", LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE", LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "HUMAN_MERGE_READY", LifecycleState.BLOCKED: "BLOCKED"}.get(next_state)
             tuple_ = lifecycle_tuple(self.issue_number, self.state, next_state, event or default_event)
             source_task_key, target_task_key = tuple_[2:] if tuple_ else (self.coordinator_key, self.coordinator_key)
@@ -505,6 +508,8 @@ class CoordinatorLifecycle:
             if fallback is None or fallback["repository"] != self.work_item.repository:
                 raise LifecycleTransitionError("BLOCKED unknown delivery requires the canonical work-item fallback")
         default_event = {LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE", LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE", LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.BLOCKED: "BLOCKED"}.get(intended_state)
+        if (source_task_key is None) != (target_task_key is None):
+            raise LifecycleTransitionError("source and target logical task keys must be supplied together")
         tuple_ = lifecycle_tuple(self.issue_number, self.state, intended_state, event or default_event)
         source_task_key = source_task_key or (tuple_[2] if tuple_ else self.coordinator_key)
         target_task_key = target_task_key or (tuple_[3] if tuple_ else self.coordinator_key)
