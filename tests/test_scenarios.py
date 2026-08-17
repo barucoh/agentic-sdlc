@@ -199,7 +199,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         ready.update({"lifecycle_state": "REVIEW_ACTIVE", "from_role": "implementation", "to_role": "reviewer", "source_task_key": "issue-1-implementation", "target_task_key": "issue-1-reviewer", "target_model": "gpt-5.6-sol", "effort": "Medium", "sandbox_mode": "read-only", "work_item": {**ready["work_item"], "pull_request_url": "https://github.com/o/r/pull/6", "commit_sha": "a" * 40}, "readiness_evidence": {"commit_sha": "b" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}})
         self.assertTrue(validate_handoff(ready))
         blocked = self.handoff()
-        blocked["lifecycle_state"] = "BLOCKED"
+        blocked.update({"lifecycle_state": "BLOCKED", "lifecycle_event": "BLOCKED", "to_role": "coordinator", "source_task_key": "issue-1-coordinator", "target_task_key": "issue-1-coordinator", "target_model": "gpt-5.6-sol", "effort": "Medium", "sandbox_mode": "read-only"})
         self.assertTrue(validate_handoff(blocked))
         blocked["blocked_fallback"] = {"repository": "o/r", "issue_or_pr_url": "https://github.com/o/r/issues/1", "operation_id": blocked["operation_id"], "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
         self.assertEqual(validate_handoff(blocked), [])

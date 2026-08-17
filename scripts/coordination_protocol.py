@@ -221,6 +221,12 @@ def lifecycle_tuple(issue: int, current: LifecycleState, nxt: LifecycleState, ev
         (LifecycleState.REVIEW_ACTIVE, LifecycleState.REVIEW_ACCEPTED): ("reviewer", "coordinator"),
         (LifecycleState.CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): ("coordinator", "implementation"),
         (LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY): ("coordinator", "human_owner"),
+        (LifecycleState.IMPLEMENTATION_ACTIVE, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
+        (LifecycleState.IMPLEMENTATION_READY, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
+        (LifecycleState.REVIEW_ACTIVE, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
+        (LifecycleState.CHANGES_REQUESTED, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
+        (LifecycleState.CORRECTION_ACTIVE, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
+        (LifecycleState.REVIEW_ACCEPTED, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
     }
     roles = pairs.get((current, nxt))
     if not roles:
@@ -229,11 +235,26 @@ def lifecycle_tuple(issue: int, current: LifecycleState, nxt: LifecycleState, ev
         LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE",
         LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE",
         LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "HUMAN_MERGE_READY",
+        LifecycleState.BLOCKED: "BLOCKED",
     }
     if event is not None and events.get(nxt) != event:
         return None
     source, target = roles
     return source, target, f"issue-{issue}-{source.replace('_', '-')}", f"issue-{issue}-{target.replace('_', '-')}"
+
+
+def canonicalize_and_validate_fallback(fallback: Any, operation_id: str) -> dict[str, str] | None:
+    fields = ("repository", "issue_or_pr_url", "operation_id", "objective", "expected_output", "evidence", "next_owner")
+    if not isinstance(fallback, dict) or any(not isinstance(fallback.get(field), str) or not fallback[field].strip() for field in fields):
+        return None
+    result = {field: fallback[field].strip() for field in fields}
+    if result["operation_id"] != operation_id or not _valid_repository(result["repository"]):
+        return None
+    if result["next_owner"] not in {"coordinator", "product", "architecture", "implementation", "qa", "reviewer", "knowledge_steward", "human_owner"}:
+        return None
+    if not re.fullmatch(r"https://github\.com/" + re.escape(result["repository"]) + r"/(issues|pull)/[1-9][0-9]*", result["issue_or_pr_url"]):
+        return None
+    return result
 
 
 def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
@@ -248,7 +269,7 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
         return ["unknown lifecycle state"]
     possible = [lifecycle_tuple(issue, current, nxt, value.get("lifecycle_event")) for current in LifecycleState]
     allowed = [item for item in possible if item]
-    if state not in {LifecycleState.IMPLEMENTATION_ACTIVE.value, LifecycleState.BLOCKED.value, LifecycleState.DELIVERY_UNKNOWN.value} and not any(
+    if state not in {LifecycleState.IMPLEMENTATION_ACTIVE.value, LifecycleState.DELIVERY_UNKNOWN.value} and not any(
         value.get("from_role") == src and value.get("to_role") == dst and value.get("source_task_key") == source_key and value.get("target_task_key") == target_key
         for src, dst, source_key, target_key in allowed
     ):
@@ -276,8 +297,7 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
         errors.append("HUMAN_MERGE_READY requires completed non-human gates")
     if state == LifecycleState.BLOCKED.value:
         fallback = value.get("blocked_fallback")
-        fields = ("repository", "issue_or_pr_url", "operation_id", "objective", "expected_output", "evidence", "next_owner")
-        if not isinstance(fallback, dict) or any(not isinstance(fallback.get(field), str) or not fallback[field].strip() for field in fields) or fallback.get("operation_id") != value.get("operation_id") or not _valid_repository(fallback.get("repository")) or not re.match(r"^https://github\.com/" + re.escape(fallback.get("repository", "")) + r"/(issues|pull)/[1-9][0-9]*$", str(fallback.get("issue_or_pr_url"))):
+        if canonicalize_and_validate_fallback(fallback, value.get("operation_id", "")) is None:
             errors.append("BLOCKED requires a reconstructible fallback")
     return errors
 
@@ -400,17 +420,20 @@ class CoordinatorLifecycle:
         if not self._valid_operation(operation_id):
             raise LifecycleTransitionError("lifecycle transitions require a UUID operation ID")
         if next_state is LifecycleState.BLOCKED:
+            fallback = canonicalize_and_validate_fallback(fallback, operation_id)
+            if fallback is None:
+                raise LifecycleTransitionError("BLOCKED requires a valid reconstructible fallback")
             probe = {"lifecycle_state": "BLOCKED", "operation_id": operation_id, "blocked_fallback": fallback}
-            fallback_errors = validate_lifecycle_handoff({**json.loads(json.dumps({"schema_version":"1.0.0","operation_id":operation_id,"from_role":"coordinator","to_role":"implementation","work_item":{"repository":"o/r","issue_number":self.issue_number,"issue_url":"https://github.com/o/r/issues/1","title":"blocked"},"target_model":"gpt-5.6-luna","effort":"Low","rationale":"A bounded implementation task.","execution_mode":"durable","sandbox_mode":"workspace-write","is_correction":False,"lifecycle_state":"BLOCKED","lifecycle_event":"BLOCKED","source_task_key":self.coordinator_key,"target_task_key":self.implementation_key,"readiness_evidence":{"commit_sha":None,"pull_request_url":None,"local_gates":"not_run","ci_status":"not_run","required_checks":[]},"objective":"Recover","inputs":["x"],"constraints":["x"],"adrs":["x"],"acceptance_criteria":["x"],"outputs":["x"],"dependencies":["x"],"escalation":["x"],"evidence":["x"],"residual_risk":["x"],"terminal_state":"blocked","blocked_fallback":fallback})), **probe})
+            fallback_errors = validate_lifecycle_handoff({**json.loads(json.dumps({"schema_version":"1.0.0","operation_id":operation_id,"from_role":"coordinator","to_role":"coordinator","work_item":{"repository":"o/r","issue_number":self.issue_number,"issue_url":"https://github.com/o/r/issues/1","title":"blocked"},"target_model":"gpt-5.6-sol","effort":"Medium","rationale":"A bounded implementation task.","execution_mode":"durable","sandbox_mode":"read-only","is_correction":False,"lifecycle_state":"BLOCKED","lifecycle_event":"BLOCKED","source_task_key":self.coordinator_key,"target_task_key":self.coordinator_key,"readiness_evidence":{"commit_sha":None,"pull_request_url":None,"local_gates":"not_run","ci_status":"not_run","required_checks":[]},"objective":"Recover","inputs":["x"],"constraints":["x"],"adrs":["x"],"acceptance_criteria":["x"],"outputs":["x"],"dependencies":["x"],"escalation":["x"],"evidence":["x"],"residual_risk":["x"],"terminal_state":"blocked","blocked_fallback":fallback})), **probe})
             if fallback_errors:
                 raise LifecycleTransitionError("BLOCKED requires a valid reconstructible fallback")
         if source_task_key is None or target_task_key is None:
             tuple_ = lifecycle_tuple(self.issue_number, self.state, next_state)
             source_task_key, target_task_key = tuple_[2:] if tuple_ else (self.coordinator_key, self.coordinator_key)
         event = event or {LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE", LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE", LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "HUMAN_MERGE_READY", LifecycleState.BLOCKED: "BLOCKED"}.get(next_state)
-        if next_state is not LifecycleState.BLOCKED and not self._direction(self.state, next_state, source_task_key, target_task_key, event):
+        if not self._direction(self.state, next_state, source_task_key, target_task_key, event):
             raise LifecycleTransitionError("unauthorized lifecycle event direction")
-        intent = json.dumps({"state": self.state.value, "next": next_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence}, sort_keys=True, separators=(",", ":"))
+        intent = json.dumps({"state": self.state.value, "next": next_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback}, sort_keys=True, separators=(",", ":"))
         if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(evidence, self.work_item):
             raise LifecycleTransitionError("lifecycle transition requires canonical passed readiness evidence")
         prior = self._operations.get(operation_id)
