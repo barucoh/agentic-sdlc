@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import shutil
 import subprocess
@@ -299,6 +300,45 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, str(uuid4()), evidence), LifecycleState.REVIEW_ACTIVE)
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACCEPTED, str(uuid4())), LifecycleState.REVIEW_ACCEPTED)
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.HUMAN_MERGE_READY, str(uuid4())), LifecycleState.HUMAN_MERGE_READY)
+
+    def test_applied_correction_rejects_coordinated_checkpoint_and_digest_tampering(self) -> None:
+        lifecycle = self.lifecycle()
+        evidence = {
+            "commit_sha": "a" * 40,
+            "pull_request_url": "https://github.com/o/r/pull/6",
+            "local_gates": "passed",
+            "ci_status": "passed",
+            "required_checks": [{"name": "validate", "status": "passed"}],
+        }
+        lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
+        for state in (LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED):
+            lifecycle.transition("coordinator", state, str(uuid4()), evidence if state is not LifecycleState.CHANGES_REQUESTED else None)
+
+        operation_id = str(uuid4())
+        self.assertEqual(
+            lifecycle.observe_delivery_unknown("coordinator", operation_id, LifecycleState.CORRECTION_ACTIVE),
+            LifecycleState.DELIVERY_UNKNOWN,
+        )
+        record = lifecycle._operations[operation_id]
+        tampered = json.loads(record["intent"])
+        self.assertEqual(tampered["correction_checkpoint"], 1)
+        tampered["correction_checkpoint"] = 0
+        record["intent"] = json.dumps(tampered, sort_keys=True, separators=(",", ":"))
+        record["intent_digest"] = hashlib.sha256(record["intent"].encode("utf-8")).hexdigest()
+        record_before = copy.deepcopy(record)
+        artifacts_before = list(lifecycle._artifact_revisions)
+
+        with self.assertRaisesRegex(LifecycleTransitionError, "not authoritative"):
+            lifecycle.reconcile_delivery("coordinator", operation_id, True)
+        self.assertEqual(lifecycle.state, LifecycleState.DELIVERY_UNKNOWN)
+        self.assertIsNone(lifecycle._correction_checkpoint)
+        self.assertEqual(lifecycle._artifact_revisions, artifacts_before)
+        self.assertEqual(lifecycle._operations[operation_id], record_before)
+
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", operation_id, False), LifecycleState.CHANGES_REQUESTED)
+        lifecycle.transition("coordinator", LifecycleState.CORRECTION_ACTIVE, str(uuid4()))
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
 
     def test_lifecycle_duplicate_operations_and_unknown_delivery_cannot_blind_activate(self) -> None:
         lifecycle = self.lifecycle()
