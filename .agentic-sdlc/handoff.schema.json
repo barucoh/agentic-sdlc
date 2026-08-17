@@ -52,7 +52,11 @@
         "title": { "type": "string", "minLength": 1 },
         "pull_request_url": { "type": ["string", "null"], "format": "uri" },
         "commit_sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" }
-      }
+      },
+      "oneOf": [
+        { "properties": { "pull_request_url": { "type": "null" }, "commit_sha": { "type": "null" } } },
+        { "required": ["pull_request_url", "commit_sha"], "properties": { "pull_request_url": { "type": "string", "format": "uri" }, "commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" } } }
+      ]
     },
     "objective": { "type": "string", "minLength": 1 },
     "target_model": {

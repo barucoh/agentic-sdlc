@@ -36,6 +36,7 @@ SUPPORTED_SCHEMA_KEYWORDS = {
     "properties",
     "const",
     "enum",
+    "oneOf",
     "pattern",
     "format",
     "minLength",
@@ -685,6 +686,9 @@ def _schema_support_errors(schema: dict[str, Any], path: str = "schema") -> list
                 errors.extend(_schema_support_errors(child, f"{path}.{collection}.{name}"))
     if isinstance(schema.get("items"), dict):
         errors.extend(_schema_support_errors(schema["items"], f"{path}.items"))
+    for index, child in enumerate(schema.get("oneOf", [])):
+        if isinstance(child, dict):
+            errors.extend(_schema_support_errors(child, f"{path}.oneOf[{index}]"))
     return errors
 
 
@@ -736,6 +740,11 @@ def _validate_schema(
         for key, child in properties.items():
             if key in value:
                 errors.extend(_validate_schema(value[key], child, root, f"{path}.{key}"))
+
+    if "oneOf" in schema:
+        matches = sum(not _validate_schema(value, option, root, path) for option in schema["oneOf"])
+        if matches != 1:
+            errors.append(f"{path} must match exactly one schema alternative")
 
     if isinstance(value, list):
         if schema.get("uniqueItems"):
