@@ -694,6 +694,8 @@ class CoordinatorLifecycle:
         intent = self._operations.get(operation_id)
         if not isinstance(intent, LifecycleOperationIntent):
             raise LifecycleTransitionError("reconciliation requires a lifecycle operation intent")
+        if intent.operation_id != operation_id or intent.operation_id != self._unknown:
+            raise LifecycleTransitionError("reconciliation intent UUID does not match the unresolved operation")
         self._validate_transition_intent(intent, reconciling=True)
         if applied:
             self._apply_transition_intent(intent, reconciling=True)

@@ -459,6 +459,43 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertNotIn(operation_id, lifecycle._retryable_operations)
         self.assertEqual(lifecycle._operations[operation_id], intent_before)
 
+    def test_reconciliation_binds_intent_uuid_to_unknown_operation_and_registry(self) -> None:
+        evidence = {
+            "commit_sha": "a" * 40,
+            "pull_request_url": "https://github.com/o/r/pull/6",
+            "local_gates": "passed",
+            "ci_status": "passed",
+            "required_checks": [{"name": "validate", "status": "passed"}],
+        }
+
+        def unknown_correction() -> tuple[CoordinatorLifecycle, str, str]:
+            lifecycle = self.lifecycle()
+            binding_id = str(uuid4())
+            lifecycle.bind_delivery_artifact(binding_id, evidence["pull_request_url"], evidence["commit_sha"])
+            for state in (LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED):
+                lifecycle.transition("coordinator", state, str(uuid4()), evidence if state is not LifecycleState.CHANGES_REQUESTED else None)
+            operation_id = str(uuid4())
+            lifecycle.observe_delivery_unknown("coordinator", operation_id, LifecycleState.CORRECTION_ACTIVE)
+            return lifecycle, binding_id, operation_id
+
+        for mode in (True, False):
+            for replacement in ("malformed-operation", str(uuid4())):
+                with self.subTest(applied=mode, replacement=replacement):
+                    lifecycle, binding_id, operation_id = unknown_correction()
+                    intent = lifecycle._operations[operation_id]
+                    object.__setattr__(intent, "operation_id", replacement)
+                    intent_after = copy.deepcopy(intent)
+                    binding_before = lifecycle._operations[binding_id]
+                    artifacts_before = list(lifecycle._artifact_revisions)
+                    with self.assertRaises(LifecycleTransitionError):
+                        lifecycle.reconcile_delivery("coordinator", operation_id, mode)
+                    self.assertEqual(lifecycle.state, LifecycleState.DELIVERY_UNKNOWN)
+                    self.assertEqual(lifecycle._unknown, operation_id)
+                    self.assertNotIn(operation_id, lifecycle._retryable_operations)
+                    self.assertEqual(lifecycle._operations[operation_id], intent_after)
+                    self.assertEqual(lifecycle._operations[binding_id], binding_before)
+                    self.assertEqual(lifecycle._artifact_revisions, artifacts_before)
+
     def test_lifecycle_duplicate_operations_and_unknown_delivery_cannot_blind_activate(self) -> None:
         lifecycle = self.lifecycle()
         evidence = {"commit_sha": "b" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
