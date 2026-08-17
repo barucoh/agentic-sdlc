@@ -255,7 +255,7 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
         errors.append("lifecycle sender, receiver, and logical keys are not an allowed event tuple")
     readiness = value.get("readiness_evidence")
     if state in {LifecycleState.IMPLEMENTATION_READY.value, LifecycleState.REVIEW_ACTIVE.value}:
-        if not _valid_readiness_evidence(readiness):
+        if not _valid_readiness_evidence(readiness, work_item):
             errors.append("lifecycle readiness requires typed passed evidence")
         elif readiness.get("commit_sha") != work_item.get("commit_sha") or readiness.get("pull_request_url") != work_item.get("pull_request_url"):
             errors.append("readiness evidence must exactly match canonical work item PR and SHA")
@@ -282,7 +282,11 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _valid_readiness_evidence(evidence: Any) -> bool:
+def _valid_repository(repository: Any) -> bool:
+    return isinstance(repository, str) and repository == repository.strip() and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", repository))
+
+
+def _valid_readiness_evidence(evidence: Any, work_item: dict[str, Any] | None = None) -> bool:
     if not isinstance(evidence, dict):
         return False
     sha = evidence.get("commit_sha")
@@ -290,14 +294,22 @@ def _valid_readiness_evidence(evidence: Any) -> bool:
     checks = evidence.get("required_checks")
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
         return False
-    if not isinstance(url, str) or not re.match(r"^https://github\.com/[^/]+/[^/]+/pull/[1-9][0-9]*$", url):
+    if not isinstance(url, str) or not re.match(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$", url):
         return False
     if evidence.get("local_gates") != "passed" or evidence.get("ci_status") != "passed":
         return False
     if not isinstance(checks, list) or not checks:
         return False
     names = [c.get("name") for c in checks if isinstance(c, dict)]
-    return len(names) == len(checks) and len(set(names)) == len(names) and all(c.get("status") == "passed" for c in checks)
+    if not (len(names) == len(checks) and len(set(names)) == len(names) and all(c.get("status") == "passed" for c in checks)):
+        return False
+    if work_item is not None:
+        if not _valid_repository(work_item.get("repository")) or evidence.get("commit_sha") != work_item.get("commit_sha") or evidence.get("pull_request_url") != work_item.get("pull_request_url"):
+            return False
+        expected = f"https://github.com/{work_item['repository']}/pull/"
+        if not url.startswith(expected):
+            return False
+    return True
 
 
 class DeliveryState(str, Enum):
@@ -349,12 +361,13 @@ class CoordinatorLifecycle:
         LifecycleState.REVIEW_ACCEPTED: {LifecycleState.HUMAN_MERGE_READY},
     }
 
-    def __init__(self, issue_number: int = 5) -> None:
+    def __init__(self, issue_number: int = 5, work_item: dict[str, Any] | None = None) -> None:
         self.state = LifecycleState.IMPLEMENTATION_ACTIVE
         self.issue_number = issue_number
         self.coordinator_key = f"issue-{issue_number}-coordinator"
         self.implementation_key = f"issue-{issue_number}-implementation"
         self.reviewer_key = f"issue-{issue_number}-reviewer"
+        self.work_item = work_item
         self._operations: dict[str, dict[str, Any]] = {}
         self._unknown: str | None = None
 
@@ -363,8 +376,8 @@ class CoordinatorLifecycle:
         return bool(re.fullmatch(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", operation_id))
 
     @staticmethod
-    def _ready_evidence(evidence: dict[str, Any] | None) -> bool:
-        return _valid_readiness_evidence(evidence)
+    def _ready_evidence(evidence: dict[str, Any] | None, work_item: dict[str, Any] | None = None) -> bool:
+        return _valid_readiness_evidence(evidence, work_item)
 
     def _direction(self, current: LifecycleState, nxt: LifecycleState, source: str, target: str, event: str | None = None) -> bool:
         allowed = lifecycle_tuple(self.issue_number, current, nxt, event)
@@ -411,7 +424,7 @@ class CoordinatorLifecycle:
             return self.state
         if self.state in {LifecycleState.DELIVERY_UNKNOWN, LifecycleState.BLOCKED, LifecycleState.HUMAN_MERGE_READY}:
             raise LifecycleTransitionError(f"cannot transition from {self.state.value}")
-        if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(evidence):
+        if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(evidence, self.work_item):
             raise LifecycleTransitionError("IMPLEMENTATION_READY requires commit SHA, PR URL, local gates, and CI status")
         if next_state not in self._TRANSITIONS.get(self.state, set()) and next_state is not LifecycleState.BLOCKED:
             raise LifecycleTransitionError(f"invalid lifecycle transition: {self.state.value} -> {next_state.value}")
@@ -455,7 +468,7 @@ class CoordinatorLifecycle:
         stored = json.loads(record["intent"])
         if not self._direction(resume_state, intended_state, stored["source"], stored["target"], stored["event"]):
             raise LifecycleTransitionError("APPLIED reconciliation has an unauthorized recorded direction")
-        if applied and intended_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(stored["evidence"]):
+        if applied and intended_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._ready_evidence(stored["evidence"], self.work_item):
             raise LifecycleTransitionError("APPLIED reconciliation requires valid readiness evidence")
         self.state = intended_state if applied else resume_state
         self._unknown = None

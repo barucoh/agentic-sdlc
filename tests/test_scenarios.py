@@ -169,6 +169,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             "reviewer": ("gpt-5.6-sol", "Medium", "read-only"),
             "knowledge_steward": ("gpt-5.6-luna", "Low", "workspace-write"),
         }
+        cases = 0
         for role, (model, effort, sandbox) in defaults.items():
             with self.subTest(role=role):
                 value = self.handoff()
@@ -176,7 +177,9 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 value["target_model"] = model
                 value["effort"] = effort
                 value["sandbox_mode"] = sandbox
-        self.assertEqual(validate_handoff(value), [])
+                self.assertEqual(validate_handoff(value), [])
+                cases += 1
+        self.assertEqual(cases, 7)
 
     def test_cycle4_direction_identity_and_typed_intent_guards(self) -> None:
         lifecycle = CoordinatorLifecycle(5)
@@ -327,6 +330,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 "readiness_evidence": {"commit_sha": "c" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]},
                 "work_item": {
                     **ready["work_item"],
+                    "repository": "o/r",
                     "pull_request_url": "https://github.com/o/r/pull/6",
                     "commit_sha": "c" * 40,
                 },
@@ -350,6 +354,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 "sandbox_mode": "read-only",
                 "work_item": {
                     **reviewer["work_item"],
+                    "repository": "o/r",
                     "pull_request_url": "https://github.com/o/r/pull/6",
                     "commit_sha": "d" * 40,
                 },
