@@ -176,7 +176,19 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 value["target_model"] = model
                 value["effort"] = effort
                 value["sandbox_mode"] = sandbox
-                self.assertEqual(validate_handoff(value), [])
+        self.assertEqual(validate_handoff(value), [])
+
+    def test_cycle4_direction_identity_and_typed_intent_guards(self) -> None:
+        lifecycle = CoordinatorLifecycle(5)
+        evidence = {"commit_sha": "e" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-reviewer")
+        op = str(uuid4())
+        lifecycle.observe_delivery_unknown("coordinator", op, LifecycleState.IMPLEMENTATION_READY, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-coordinator")
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", op, True), LifecycleState.IMPLEMENTATION_READY)
+        self.assertEqual(lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, op, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-coordinator"), LifecycleState.IMPLEMENTATION_READY)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, op, {**evidence, "commit_sha": "f" * 40}, source_task_key="issue-5-coordinator", target_task_key="issue-5-reviewer")
 
     def test_routing_requires_explicit_model_effort_and_one_sentence_rationale(self) -> None:
         for field in ("target_model", "effort", "rationale"):
@@ -239,6 +251,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             "pull_request_url": "https://github.com/o/r/pull/6",
             "local_gates": "passed",
             "ci_status": "passed",
+            "required_checks": [{"name": "validate", "status": "passed"}],
         }
         self.assertEqual(
             lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence),
@@ -247,7 +260,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
 
     def test_lifecycle_sequences_review_correction_and_human_gate(self) -> None:
         lifecycle = CoordinatorLifecycle()
-        evidence = {"commit_sha": "a" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed"}
+        evidence = {"commit_sha": "a" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
         for next_state in (LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE):
             self.assertEqual(lifecycle.transition("coordinator", next_state, str(uuid4()), evidence), next_state)
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.CHANGES_REQUESTED, str(uuid4())), LifecycleState.CHANGES_REQUESTED)
@@ -259,7 +272,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
 
     def test_lifecycle_duplicate_operations_and_unknown_delivery_cannot_blind_activate(self) -> None:
         lifecycle = CoordinatorLifecycle()
-        evidence = {"commit_sha": "b" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed"}
+        evidence = {"commit_sha": "b" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
         lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
         operation_id = str(uuid4())
         self.assertEqual(lifecycle.transition("coordinator", LifecycleState.REVIEW_ACTIVE, operation_id, evidence), LifecycleState.REVIEW_ACTIVE)
@@ -288,11 +301,13 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             {
                 "lifecycle_state": "IMPLEMENTATION_READY",
                 "evidence": ["local gates passed", "CI passed"],
+                "readiness_evidence": {"commit_sha": "c" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]},
                 "work_item": {
                     **ready["work_item"],
                     "pull_request_url": "https://github.com/o/r/pull/6",
                     "commit_sha": "c" * 40,
                 },
+                "readiness_evidence": {"commit_sha": "d" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]},
             }
         )
         self.assertEqual(validate_handoff(ready), [])
@@ -304,6 +319,9 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             {
                 "lifecycle_state": "REVIEW_ACTIVE",
                 "to_role": "reviewer",
+                "from_role": "coordinator",
+                "source_task_key": "issue-1-coordinator",
+                "target_task_key": "issue-1-reviewer",
                 "target_model": "gpt-5.6-sol",
                 "effort": "Medium",
                 "sandbox_mode": "read-only",
@@ -312,6 +330,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                     "pull_request_url": "https://github.com/o/r/pull/6",
                     "commit_sha": "d" * 40,
                 },
+                "readiness_evidence": {"commit_sha": "d" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]},
             }
         )
         self.assertEqual(validate_handoff(reviewer), [])

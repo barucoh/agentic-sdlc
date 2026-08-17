@@ -17,6 +17,9 @@
     "sandbox_mode",
     "is_correction",
     "lifecycle_state",
+    "source_task_key",
+    "target_task_key",
+    "readiness_evidence",
     "objective",
     "inputs",
     "constraints",
@@ -72,6 +75,19 @@
     "lifecycle_state": {
       "type": "string",
       "enum": ["IMPLEMENTATION_ACTIVE", "IMPLEMENTATION_READY", "REVIEW_ACTIVE", "CHANGES_REQUESTED", "CORRECTION_ACTIVE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED", "DELIVERY_UNKNOWN"]
+    },
+    "source_task_key": { "type": "string", "pattern": "^issue-[1-9][0-9]*-[a-z][a-z0-9-]*$" },
+    "target_task_key": { "type": "string", "pattern": "^issue-[1-9][0-9]*-[a-z][a-z0-9-]*$" },
+    "readiness_evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["commit_sha", "pull_request_url", "local_gates", "ci_status", "required_checks"],
+      "properties": {
+        "commit_sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+        "pull_request_url": { "type": ["string", "null"], "format": "uri" },
+        "local_gates": { "type": "string", "enum": ["passed", "failed", "pending", "not_run"] },
+        "ci_status": { "type": "string", "enum": ["passed", "failed", "pending", "not_run"] },
+        "required_checks": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["name", "status"], "properties": { "name": { "type": "string", "minLength": 1 }, "status": { "type": "string", "enum": ["passed", "failed", "pending", "not_run"] } } }, "uniqueItems": true }
+      }
     },
     "watchdog_seconds": { "type": "integer", "minimum": 20, "maximum": 30 },
     "inputs": { "$ref": "#/$defs/stringList" },

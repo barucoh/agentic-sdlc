@@ -216,28 +216,49 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
     work_item = value.get("work_item", {})
     evidence = [str(item).lower() for item in value.get("evidence", [])]
     errors: list[str] = []
+    issue = work_item.get("issue_number")
+    expected_source = f"issue-{issue}-{str(value.get('from_role','')).replace('_','-')}"
+    expected_target = f"issue-{issue}-{str(value.get('to_role','')).replace('_','-')}"
+    if state != LifecycleState.IMPLEMENTATION_ACTIVE.value and (value.get("source_task_key") != expected_source or value.get("target_task_key") != expected_target):
+        errors.append("source and target logical task keys must match issue-scoped roles")
+    readiness = value.get("readiness_evidence")
+    if state in {LifecycleState.IMPLEMENTATION_READY.value, LifecycleState.REVIEW_ACTIVE.value}:
+        if not _valid_readiness_evidence(readiness):
+            errors.append("lifecycle readiness requires typed passed evidence")
     if state == LifecycleState.IMPLEMENTATION_READY.value:
         if not re.fullmatch(r"[0-9a-f]{40}", str(work_item.get("commit_sha") or "")):
             errors.append("IMPLEMENTATION_READY requires an exact commit SHA")
         if not work_item.get("pull_request_url"):
             errors.append("IMPLEMENTATION_READY requires a pull request URL")
-        if not any("local gate" in item for item in evidence):
-            errors.append("IMPLEMENTATION_READY requires local-gate evidence")
-        if not any("ci" in item for item in evidence):
-            errors.append("IMPLEMENTATION_READY requires CI evidence")
     if state == LifecycleState.REVIEW_ACTIVE.value:
         if value.get("to_role") != "reviewer":
             errors.append("REVIEW_ACTIVE handoffs must explicitly activate Reviewer")
         if value.get("target_model") != "gpt-5.6-sol" or value.get("effort") != "Medium":
             errors.append("REVIEW_ACTIVE must activate Reviewer with Sol/Medium")
-        if not work_item.get("commit_sha") or not work_item.get("pull_request_url"):
-            errors.append("REVIEW_ACTIVE requires the exact implementation SHA and PR URL")
     if state == LifecycleState.CORRECTION_ACTIVE.value:
         if value.get("to_role") != "implementation" or not value.get("is_correction"):
             errors.append("CORRECTION_ACTIVE must return to the same Implementation task")
     if state == LifecycleState.HUMAN_MERGE_READY.value and value.get("terminal_state") != "completed":
         errors.append("HUMAN_MERGE_READY requires completed non-human gates")
     return errors
+
+
+def _valid_readiness_evidence(evidence: Any) -> bool:
+    if not isinstance(evidence, dict):
+        return False
+    sha = evidence.get("commit_sha")
+    url = evidence.get("pull_request_url")
+    checks = evidence.get("required_checks")
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        return False
+    if not isinstance(url, str) or not re.match(r"^https://github\.com/[^/]+/[^/]+/pull/[1-9][0-9]*$", url):
+        return False
+    if evidence.get("local_gates") != "passed" or evidence.get("ci_status") != "passed":
+        return False
+    if not isinstance(checks, list) or not checks:
+        return False
+    names = [c.get("name") for c in checks if isinstance(c, dict)]
+    return len(names) == len(checks) and len(set(names)) == len(names) and all(c.get("status") == "passed" for c in checks)
 
 
 class DeliveryState(str, Enum):
@@ -289,42 +310,79 @@ class CoordinatorLifecycle:
         LifecycleState.REVIEW_ACCEPTED: {LifecycleState.HUMAN_MERGE_READY},
     }
 
-    def __init__(self) -> None:
+    def __init__(self, issue_number: int = 5) -> None:
         self.state = LifecycleState.IMPLEMENTATION_ACTIVE
-        self._operations: dict[str, LifecycleState] = {}
-        self._unknown: tuple[str, LifecycleState, LifecycleState] | None = None
+        self.issue_number = issue_number
+        self.coordinator_key = f"issue-{issue_number}-coordinator"
+        self.implementation_key = f"issue-{issue_number}-implementation"
+        self.reviewer_key = f"issue-{issue_number}-reviewer"
+        self._operations: dict[str, dict[str, Any]] = {}
+        self._unknown: str | None = None
 
     @staticmethod
     def _valid_operation(operation_id: str) -> bool:
         return bool(re.fullmatch(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", operation_id))
 
     @staticmethod
-    def _ready_evidence(evidence: dict[str, str] | None) -> bool:
-        if not isinstance(evidence, dict):
-            return False
-        sha = evidence.get("commit_sha", "")
-        return (
-            bool(re.fullmatch(r"[0-9a-f]{40}", sha))
-            and bool(evidence.get("pull_request_url"))
-            and bool(evidence.get("local_gates"))
-            and bool(evidence.get("ci_status"))
-        )
+    def _ready_evidence(evidence: dict[str, Any] | None) -> bool:
+        return _valid_readiness_evidence(evidence)
+
+    def _direction(self, current: LifecycleState, nxt: LifecycleState, source: str, target: str) -> bool:
+        allowed = {
+            (LifecycleState.IMPLEMENTATION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): (self.implementation_key, self.coordinator_key),
+            (LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE): (self.coordinator_key, self.reviewer_key),
+            (LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED): (self.reviewer_key, self.coordinator_key),
+            (LifecycleState.CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): (self.coordinator_key, self.implementation_key),
+            (LifecycleState.CORRECTION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): (self.implementation_key, self.coordinator_key),
+            (LifecycleState.REVIEW_ACTIVE, LifecycleState.REVIEW_ACCEPTED): (self.reviewer_key, self.coordinator_key),
+            (LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY): (self.coordinator_key, "issue-%d-human-owner" % self.issue_number),
+        }
+        return allowed.get((current, nxt)) == (source, target)
 
     def transition(
         self,
         actor: str,
         next_state: LifecycleState,
         operation_id: str,
-        evidence: dict[str, str] | None = None,
+        evidence: dict[str, Any] | None = None,
+        *,
+        source_task_key: str | None = None,
+        target_task_key: str | None = None,
+        event: str | None = None,
     ) -> LifecycleState:
         if actor != "coordinator":
             raise LifecycleTransitionError("Coordinator is the sole lifecycle owner")
         if not self._valid_operation(operation_id):
             raise LifecycleTransitionError("lifecycle transitions require a UUID operation ID")
+        existing = self._operations.get(operation_id)
+        if existing is not None and existing.get("state") is next_state and not existing.get("retryable"):
+            prior_intent = json.loads(existing["intent"])
+            if prior_intent.get("evidence") == evidence:
+                return self.state
+        if source_task_key is None or target_task_key is None:
+            defaults = {
+                (LifecycleState.IMPLEMENTATION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): (self.implementation_key, self.coordinator_key),
+                (LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE): (self.coordinator_key, self.reviewer_key),
+                (LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED): (self.reviewer_key, self.coordinator_key),
+                (LifecycleState.CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): (self.coordinator_key, self.implementation_key),
+                (LifecycleState.CORRECTION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): (self.implementation_key, self.coordinator_key),
+                (LifecycleState.REVIEW_ACTIVE, LifecycleState.REVIEW_ACCEPTED): (self.reviewer_key, self.coordinator_key),
+                (LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY): (self.coordinator_key, f"issue-{self.issue_number}-human-owner"),
+            }
+            source_task_key, target_task_key = defaults.get((self.state, next_state), (self.coordinator_key, self.coordinator_key))
+        if next_state is not LifecycleState.BLOCKED and not self._direction(self.state, next_state, source_task_key, target_task_key):
+            raise LifecycleTransitionError("unauthorized lifecycle event direction")
+        intent = json.dumps({"state": self.state.value, "next": next_state.value, "source": source_task_key, "target": target_task_key, "event": event or next_state.value, "evidence": evidence}, sort_keys=True, separators=(",", ":"))
         prior = self._operations.get(operation_id)
         if prior is not None:
-            if prior is not next_state:
+            if not prior.get("retryable") and prior["intent"] != intent:
                 raise LifecycleTransitionError("operation ID cannot be reused for another transition")
+            if prior["intent"] != intent:
+                raise LifecycleTransitionError("operation ID cannot be reused for another transition")
+            if prior.get("retryable"):
+                prior["retryable"] = False
+                prior["state"] = next_state
+                self.state = next_state
             return self.state
         if self.state in {LifecycleState.DELIVERY_UNKNOWN, LifecycleState.BLOCKED, LifecycleState.HUMAN_MERGE_READY}:
             raise LifecycleTransitionError(f"cannot transition from {self.state.value}")
@@ -334,11 +392,11 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError(f"invalid lifecycle transition: {self.state.value} -> {next_state.value}")
         if next_state is LifecycleState.REVIEW_ACTIVE and self.state is not LifecycleState.IMPLEMENTATION_READY:
             raise LifecycleTransitionError("Reviewer activates only from IMPLEMENTATION_READY")
-        self._operations[operation_id] = next_state
+        self._operations[operation_id] = {"intent": intent, "state": next_state, "retryable": False, "terminal": next_state is LifecycleState.HUMAN_MERGE_READY}
         self.state = next_state
         return self.state
 
-    def observe_delivery_unknown(self, actor: str, operation_id: str, intended_state: LifecycleState) -> LifecycleState:
+    def observe_delivery_unknown(self, actor: str, operation_id: str, intended_state: LifecycleState, evidence: dict[str, Any] | None = None, *, source_task_key: str | None = None, target_task_key: str | None = None, event: str | None = None) -> LifecycleState:
         if actor != "coordinator":
             raise LifecycleTransitionError("Coordinator is the sole lifecycle owner")
         if not self._valid_operation(operation_id):
@@ -347,19 +405,28 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError(f"cannot observe transport from {self.state.value}")
         if intended_state not in self._TRANSITIONS.get(self.state, set()):
             raise LifecycleTransitionError("unknown transport target is not a valid next lifecycle state")
-        self._unknown = (operation_id, self.state, intended_state)
+        source_task_key = source_task_key or self.implementation_key
+        target_task_key = target_task_key or self.coordinator_key
+        intent = json.dumps({"state": self.state.value, "next": intended_state.value, "source": source_task_key, "target": target_task_key, "event": event or intended_state.value, "evidence": evidence}, sort_keys=True, separators=(",", ":"))
+        self._operations[operation_id] = {"intent": intent, "state": self.state, "retryable": False, "terminal": False, "intended": intended_state}
+        self._unknown = operation_id
         self.state = LifecycleState.DELIVERY_UNKNOWN
         return self.state
 
     def reconcile_delivery(self, actor: str, operation_id: str, applied: bool) -> LifecycleState:
         if actor != "coordinator":
             raise LifecycleTransitionError("Coordinator is the sole lifecycle owner")
-        if self._unknown is None or self._unknown[0] != operation_id:
+        if self._unknown is None or self._unknown != operation_id:
             raise LifecycleTransitionError("exact DELIVERY_UNKNOWN operation must be reconciled")
-        _, resume_state, intended_state = self._unknown
+        record = self._operations[operation_id]
+        intended_state = record["intended"]
+        resume_state = record["state"]
+        if applied and intended_state is LifecycleState.IMPLEMENTATION_READY and not self._ready_evidence(json.loads(record["intent"])["evidence"]):
+            raise LifecycleTransitionError("APPLIED reconciliation requires valid readiness evidence")
         self.state = intended_state if applied else resume_state
         self._unknown = None
-        self._operations[operation_id] = self.state
+        record["retryable"] = not applied
+        record["state"] = self.state
         return self.state
 
 

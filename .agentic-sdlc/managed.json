@@ -1,8 +1,8 @@
 {
   "files": {
     ".agentic-sdlc/config.yaml": "28de77e328ac905e3496fd1140c2f8303021f8625b6df7d39eb5ac17ec50c59c",
-    ".agentic-sdlc/handoff-template.json": "2e49079a88072caf52007f225a2d89d44b166acdd821da46286125a6ecaf4388",
-    ".agentic-sdlc/handoff.schema.json": "a6ecacd0a302afcb4e6177c64b8ae9125f1445bfd7adec4217b79c94db79fcb3",
+    ".agentic-sdlc/handoff-template.json": "0143eef3e61ec42c8ea61e02e35f2c350dc3399329e20540e3292c331761e881",
+    ".agentic-sdlc/handoff.schema.json": "3931f3b3f4a5390dea6c50dd8bef9c9e7c0462afacc738af72014f2ae690ef54",
     ".codex/agents/architecture.toml": "5032b67f3d3aad6de677b09cb1fa5248aed410ff3423c2127dea348789de31ee",
     ".codex/agents/coordinator.toml": "82a1abb6c2d38f1006fd674a3ac25019d03055cf4a303a7d3818cb2034fb9226",
     ".codex/agents/implementation.toml": "561e25bbd47dfeccd785d931c61d714bc520753a7ed64a433185b92323d4c848",
