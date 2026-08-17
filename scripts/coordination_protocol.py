@@ -7,6 +7,7 @@ not persist transport state or perform external side effects.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -484,7 +485,12 @@ class CoordinatorLifecycle:
         return not (next_state is LifecycleState.IMPLEMENTATION_READY and self.state is LifecycleState.CORRECTION_ACTIVE and (self._correction_checkpoint is None or len(self._artifact_revisions) <= self._correction_checkpoint))
 
     def _apply_transition_intent(self, record: dict[str, Any], next_state: LifecycleState) -> LifecycleState:
+        if record.get("intent_digest") != hashlib.sha256(record["intent"].encode("utf-8")).hexdigest():
+            raise LifecycleTransitionError("immutable transition intent integrity check failed")
         intent = json.loads(record["intent"])
+        checkpoint = intent.get("correction_checkpoint")
+        if next_state is LifecycleState.CORRECTION_ACTIVE and (not isinstance(checkpoint, int) or checkpoint < 0 or checkpoint > len(self._artifact_revisions)):
+            raise LifecycleTransitionError("correction checkpoint is missing or malformed")
         if next_state is LifecycleState.CORRECTION_ACTIVE:
             self._correction_checkpoint = intent["correction_checkpoint"]
         self.state = next_state
@@ -543,7 +549,7 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError(f"invalid lifecycle transition: {self.state.value} -> {next_state.value}")
         if next_state is LifecycleState.REVIEW_ACTIVE and self.state is not LifecycleState.IMPLEMENTATION_READY:
             raise LifecycleTransitionError("Reviewer activates only from IMPLEMENTATION_READY")
-        record = {"intent": intent, "state": self.state, "retryable": False, "terminal": next_state is LifecycleState.HUMAN_MERGE_READY}
+        record = {"intent": intent, "intent_digest": hashlib.sha256(intent.encode("utf-8")).hexdigest(), "state": self.state, "retryable": False, "terminal": next_state is LifecycleState.HUMAN_MERGE_READY}
         self._operations[operation_id] = record
         return self._apply_transition_intent(record, next_state)
 
@@ -575,7 +581,7 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError("unknown delivery requires an allowed exact lifecycle direction")
         checkpoint = len(self._artifact_revisions) if intended_state is LifecycleState.CORRECTION_ACTIVE else None
         intent = json.dumps({"state": self.state.value, "next": intended_state.value, "source": source_task_key, "target": target_task_key, "event": event, "evidence": evidence, "fallback": fallback, "correction_checkpoint": checkpoint}, sort_keys=True, separators=(",", ":"))
-        self._operations[operation_id] = {"intent": intent, "state": self.state, "retryable": False, "terminal": False, "intended": intended_state}
+        self._operations[operation_id] = {"intent": intent, "intent_digest": hashlib.sha256(intent.encode("utf-8")).hexdigest(), "state": self.state, "retryable": False, "terminal": False, "intended": intended_state}
         self._unknown = operation_id
         self.state = LifecycleState.DELIVERY_UNKNOWN
         return self.state
@@ -589,6 +595,8 @@ class CoordinatorLifecycle:
         intended_state = record["intended"]
         resume_state = record["state"]
         stored = json.loads(record["intent"])
+        if record.get("intent_digest") != hashlib.sha256(record["intent"].encode("utf-8")).hexdigest():
+            raise LifecycleTransitionError("immutable transition intent integrity check failed")
         if not self._direction(resume_state, intended_state, stored["source"], stored["target"], stored["event"]):
             raise LifecycleTransitionError("APPLIED reconciliation has an unauthorized recorded direction")
         if applied and intended_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._bound_ready_evidence(stored["evidence"]):
