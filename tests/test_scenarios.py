@@ -340,6 +340,68 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
 
+    def test_correction_checkpoint_is_semantic_not_mutable_authority_state(self) -> None:
+        evidence = {
+            "commit_sha": "a" * 40,
+            "pull_request_url": "https://github.com/o/r/pull/6",
+            "local_gates": "passed",
+            "ci_status": "passed",
+            "required_checks": [{"name": "validate", "status": "passed"}],
+        }
+
+        def unknown_correction() -> tuple[CoordinatorLifecycle, str]:
+            lifecycle = self.lifecycle()
+            lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
+            for state in (LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED):
+                lifecycle.transition("coordinator", state, str(uuid4()), evidence if state is not LifecycleState.CHANGES_REQUESTED else None)
+            operation_id = str(uuid4())
+            lifecycle.observe_delivery_unknown("coordinator", operation_id, LifecycleState.CORRECTION_ACTIVE)
+            return lifecycle, operation_id
+
+        for name, replacement in {
+            "zero": 0,
+            "boolean": True,
+            "missing": None,
+            "string": "1",
+            "negative": -1,
+            "oversized": 2,
+        }.items():
+            with self.subTest(checkpoint=name):
+                lifecycle, operation_id = unknown_correction()
+                record = lifecycle._operations[operation_id]
+                tampered = json.loads(record["intent"])
+                if replacement is None:
+                    tampered.pop("correction_checkpoint")
+                else:
+                    tampered["correction_checkpoint"] = replacement
+                record["intent"] = json.dumps(tampered, sort_keys=True, separators=(",", ":"))
+                record["intent_digest"] = hashlib.sha256(record["intent"].encode("utf-8")).hexdigest()
+                lifecycle._correction_authority = {operation_id: replacement}
+                record_before = copy.deepcopy(record)
+                artifacts_before = list(lifecycle._artifact_revisions)
+
+                with self.assertRaises(LifecycleTransitionError):
+                    lifecycle.reconcile_delivery("coordinator", operation_id, True)
+                self.assertEqual(lifecycle.state, LifecycleState.DELIVERY_UNKNOWN)
+                self.assertEqual(lifecycle._unknown, operation_id)
+                self.assertIsNone(lifecycle._correction_checkpoint)
+                self.assertEqual(lifecycle._artifact_revisions, artifacts_before)
+                self.assertEqual(lifecycle._operations[operation_id], record_before)
+
+        lifecycle, operation_id = unknown_correction()
+        record = lifecycle._operations[operation_id]
+        tampered = json.loads(record["intent"])
+        tampered["correction_checkpoint"] = 0
+        record["intent"] = json.dumps(tampered, sort_keys=True, separators=(",", ":"))
+        record["intent_digest"] = hashlib.sha256(record["intent"].encode("utf-8")).hexdigest()
+        lifecycle._correction_authority = {operation_id: 0}
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.reconcile_delivery("coordinator", operation_id, True)
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", operation_id, False), LifecycleState.CHANGES_REQUESTED)
+        lifecycle.transition("coordinator", LifecycleState.CORRECTION_ACTIVE, str(uuid4()))
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("coordinator", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
+
     def test_lifecycle_duplicate_operations_and_unknown_delivery_cannot_blind_activate(self) -> None:
         lifecycle = self.lifecycle()
         evidence = {"commit_sha": "b" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
