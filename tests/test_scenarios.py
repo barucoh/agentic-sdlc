@@ -927,6 +927,33 @@ class RepositoryStateTests(unittest.TestCase):
         self.assertEqual(payload["after"]["head"], sha)
         self.assertEqual(payload["exit_code"], 0)
         self.assertTrue(payload["command"])
+        self.assertEqual(payload["before"]["branch_refs"], payload["after"]["branch_refs"])
+
+    def test_qa_cli_rejects_create_then_detach_branch_ref_change(self) -> None:
+        target, sha = self.qa_repository()
+        code = f"import subprocess; subprocess.run(['git','branch','qa-scratch'], check=True); subprocess.run(['git','checkout','--detach','{sha}'], check=True)"
+        result = self.run_qa_cli(target, sha, code)
+        self.assertEqual(result.returncode, 2)
+        payload = json.loads(result.stdout)
+        self.assertIn("refs/heads", " ".join(payload["errors"]))
+        self.assertNotEqual(payload["before"]["branch_refs"], payload["after"]["branch_refs"])
+
+    def test_qa_cli_rejects_moved_ref_after_restoring_detached_head(self) -> None:
+        target, sha = self.qa_repository()
+        code = f"import subprocess; subprocess.run(['git','commit','--allow-empty','-m','moved'], check=True); new=subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(); subprocess.run(['git','update-ref','refs/heads/main',new], check=True); subprocess.run(['git','reset','--hard','{sha}'], check=True)"
+        result = self.run_qa_cli(target, sha, code)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("refs/heads", result.stdout)
+
+    def test_qa_cli_rejects_local_branch_delete_and_rename(self) -> None:
+        target, sha = self.qa_repository()
+        deleted = self.run_qa_cli(target, sha, "import subprocess; subprocess.run(['git','branch','-D','main'], check=True)")
+        self.assertEqual(deleted.returncode, 2)
+        self.assertIn("refs/heads", deleted.stdout)
+        target, sha = self.qa_repository()
+        renamed = self.run_qa_cli(target, sha, "import subprocess; subprocess.run(['git','branch','-m','main','renamed'], check=True)")
+        self.assertEqual(renamed.returncode, 2)
+        self.assertIn("refs/heads", renamed.stdout)
 
     def test_qa_cli_allows_declared_output_but_rejects_preexisting_source(self) -> None:
         target, sha = self.qa_repository()

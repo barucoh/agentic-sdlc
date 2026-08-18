@@ -13,7 +13,7 @@
     "docs/agentic-sdlc/coordination.md": "0f9db2a86e1fd62e1bfe4a43f901d9a0c1574d1d38ce58cd9990dcd9ced6b64d",
     "docs/agentic-sdlc/role-contracts.md": "5796c52b7fc0278b2d5d5e37e77ebb793fd7c5c8755533671987503cd1260318",
     "scripts/coordination_protocol.py": "ba1b223b6aff88321d6a0067cebf9700a6cd871d03734b384aa78978a1ce6c4c",
-    "scripts/qa_workspace.py": "e002b274c1e914181874cde7bc7c00e003bef8fb513e6aee7552dea94970cd60",
+    "scripts/qa_workspace.py": "1b16310790d1daf337610926cf18b982cfa9fdeed054f043c23582e529c9dde1",
     "scripts/validate_handoff.py": "ddacb868ff6f6891c0bb0bbc33a94114120ce23a22c7f80134d7bc7cc3bda2a9"
   },
   "managed_blocks": {

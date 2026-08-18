@@ -22,6 +22,7 @@ class WorkspaceSnapshot:
     branch: str
     status: tuple[str, ...]
     source_diff: str
+    branch_refs: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,15 @@ def _branch(workspace: Path) -> str:
     return result.stdout.strip()
 
 
+def _branch_refs(workspace: Path) -> tuple[tuple[str, str], ...]:
+    refs = _git(workspace, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads")
+    pairs: list[tuple[str, str]] = []
+    for line in refs.splitlines():
+        ref, object_id = line.split(" ", 1)
+        pairs.append((ref, object_id))
+    return tuple(sorted(pairs))
+
+
 def _under_declared_output(path: str, declared_outputs: tuple[str, ...]) -> bool:
     normalized = path.replace("\\", "/").lstrip("./")
     return any(normalized == output or normalized.startswith(output + "/") for output in declared_outputs)
@@ -90,6 +100,7 @@ def capture_snapshot(workspace: str | Path, declared_outputs: Iterable[str] = ()
         branch=_branch(root),
         status=_status_paths(status, outputs),
         source_diff=unstaged + staged,
+        branch_refs=_branch_refs(root),
     )
 
 
@@ -135,6 +146,8 @@ def verify_qa_workspace(
         errors.append("QA workspace must remain detached (no branch attached)")
     if before.branch != after.branch:
         errors.append("QA workspace branch identity changed during behavioral verification")
+    if before.branch_refs != after.branch_refs:
+        errors.append("QA local refs/heads map changed during behavioral verification")
     forbidden = {"source-edit", "source_mutation", "commit", "push"}
     bad_intents = sorted(set(intents) & forbidden)
     if bad_intents:
