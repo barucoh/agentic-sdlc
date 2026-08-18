@@ -42,6 +42,9 @@ MANAGED_PATHS = tuple(
         ".codex/agents/product.toml",
         ".codex/agents/qa.toml",
         ".codex/agents/reviewer.toml",
+        "scripts/coordination_protocol.py",
+        "scripts/validate_handoff.py",
+        "scripts/qa_workspace.py",
         "docs/agentic-sdlc/coordination.md",
         "docs/agentic-sdlc/role-contracts.md",
     )

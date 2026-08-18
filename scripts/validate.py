@@ -55,6 +55,8 @@ required_files = [
     ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/handoff-template.json",
     ROOT / "scripts/manage_repository.py",
     ROOT / "scripts/coordination_protocol.py",
+    ROOT / "scripts/validate_handoff.py",
+    ROOT / "scripts/qa_workspace.py",
 ]
 for path in required_files:
     if not path.is_file():

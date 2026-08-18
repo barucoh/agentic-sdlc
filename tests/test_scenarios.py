@@ -36,6 +36,7 @@ from coordination_protocol import (  # noqa: E402
     dispatch_issue_task,
     send_cross_task_handoff,
 )
+from qa_workspace import capture_snapshot, verify_qa_workspace  # noqa: E402
 import manage_repository  # noqa: E402
 
 
@@ -268,6 +269,31 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertIn("isolated disposable qa worktree", contract)
         self.assertIn("behavioral tools may create caches/build/test outputs", contract)
         self.assertIn("source mutation", contract)
+
+    def test_qa_workspace_check_binds_exact_head_and_rejects_source_intent(self) -> None:
+        workspace = ROOT
+        before = capture_snapshot(workspace, [".pytest_cache", "build", "dist"])
+        after = capture_snapshot(workspace, [".pytest_cache", "build", "dist"])
+        valid = verify_qa_workspace(
+            before,
+            after,
+            expected_sha=after.head,
+            implementation_branch="some-other-implementation-branch",
+            declared_outputs=[".pytest_cache", "build", "dist"],
+        )
+        self.assertTrue(valid.passed)
+        self.assertIn("host/task-control", valid.cleanup_responsibility)
+        invalid = verify_qa_workspace(
+            before,
+            after,
+            expected_sha="0" * 40,
+            implementation_branch=after.branch or "codex/5-harden-coordination-resilience",
+            declared_outputs=[".pytest_cache"],
+            intents=["commit"],
+        )
+        self.assertFalse(invalid.passed)
+        self.assertTrue(any("exact expected" in error for error in invalid.errors))
+        self.assertTrue(any("forbidden" in error for error in invalid.errors))
 
     def test_cycle4_direction_identity_and_typed_intent_guards(self) -> None:
         lifecycle = self.lifecycle()
@@ -859,6 +885,8 @@ class RepositoryStateTests(unittest.TestCase):
         self.assertIn(("delete", ".codex/config.toml"), classifications)
         self.assertFalse((target / ".codex/config.toml").exists())
         self.assertEqual(tomllib.loads((target / ".codex/agents/coordinator.toml").read_text(encoding="utf-8"))["name"], "coordinator")
+        for relative in ("scripts/coordination_protocol.py", "scripts/validate_handoff.py", "scripts/qa_workspace.py"):
+            self.assertTrue((target / relative).is_file(), relative)
         config = (target / ".agentic-sdlc/config.yaml").read_text(encoding="utf-8")
         self.assertIn('project_name: "Legacy Fixture"', config)
         self.assertIn('session_title_format: "#{issue_number} {role_code} - {issue_title}"', config)
@@ -866,6 +894,36 @@ class RepositoryStateTests(unittest.TestCase):
         self.assertNotIn("{project_name} #{issue_number}", config)
         again, _, _ = manage_repository.plan(target, "Legacy Fixture")
         self.assertFalse([a for a in again if a.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
+
+    def test_fresh_bootstrap_installs_runtime_cli_and_blocks_invalid_dispatch(self) -> None:
+        temporary = ROOT / "tests" / ".tmp" / str(uuid4())
+        temporary.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, temporary)
+        target = temporary / "fresh"
+        target.mkdir()
+        actions, writes, obsolete = manage_repository.plan(target, "Fresh Fixture")
+        self.assertFalse([action for action in actions if action.classification == "conflict"])
+        manage_repository.apply(target, writes, obsolete, "Fresh Fixture")
+        for relative in ("scripts/coordination_protocol.py", "scripts/validate_handoff.py", "scripts/qa_workspace.py"):
+            self.assertTrue((target / relative).is_file(), relative)
+        handoff_path = target / ".agentic-sdlc/handoff-template.json"
+        valid = json.loads(handoff_path.read_text(encoding="utf-8"))
+        cli = target / "scripts/validate_handoff.py"
+        accepted = subprocess.run([sys.executable, str(cli)], input=json.dumps(valid), text=True, capture_output=True, cwd=target, check=False)
+        self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+        invalid = copy.deepcopy(valid)
+        invalid["objective"] = ""
+        dispatch_probe = "import json,sys; sys.path.insert(0, 'scripts'); from coordination_protocol import dispatch_issue_task; dispatch_issue_task(json.loads(sys.stdin.read()), lambda _: print('DISPATCH_CALLED'))"
+        rejected = subprocess.run([sys.executable, "-c", dispatch_probe], input=json.dumps(invalid), text=True, capture_output=True, cwd=target, check=False)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("blocked by invalid handoff", rejected.stderr)
+        self.assertNotIn("DISPATCH_CALLED", rejected.stdout + rejected.stderr)
+        actions, _, _ = manage_repository.plan(target, "Fresh Fixture")
+        self.assertFalse([action for action in actions if action.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
+        runtime = target / "scripts/qa_workspace.py"
+        runtime.write_text(runtime.read_text(encoding="utf-8") + "\n# local drift\n", encoding="utf-8")
+        actions, _, _ = manage_repository.plan(target, "Fresh Fixture")
+        self.assertIn(("conflict", "scripts/qa_workspace.py"), {(a.classification, a.path.as_posix()) for a in actions})
 
     def test_windows_crlf_noop_apply_preserves_managed_manifest_bytes(self) -> None:
         target, _ = self.apply_fixture("customized_repository", "Customized Fixture")

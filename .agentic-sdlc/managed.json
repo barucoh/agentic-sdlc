@@ -8,10 +8,13 @@
     ".codex/agents/implementation.toml": "1afe55dc673f507474e9e131aa295ad586eb6448cdc1ac113626217f1fa3298b",
     ".codex/agents/knowledge_steward.toml": "5baa394c58a6e3042422c99c7b87e61791dbe1bf4a76a270219f45178605b412",
     ".codex/agents/product.toml": "67bf6547ef110c070ce5d010ad85470fd03320049a5f5447f3bf6b67e5acb0f7",
-    ".codex/agents/qa.toml": "839d10820d0efbcefcc2c2fbdf0ecf208d64ac08cfa674768b855b95a5037f19",
+    ".codex/agents/qa.toml": "1a34d9281d21ea626b347a367a65497e8ae367ad24a1d3e0c7bc9acd53e610c3",
     ".codex/agents/reviewer.toml": "a7783a345ab4a82399f10748aee80b6def47905c3737a92f8643f86cbd320670",
-    "docs/agentic-sdlc/coordination.md": "8e926fa9bdfac43aa7ef68febfa12cbb900554f6f083202e2e324dcac5cb57bb",
-    "docs/agentic-sdlc/role-contracts.md": "5796c52b7fc0278b2d5d5e37e77ebb793fd7c5c8755533671987503cd1260318"
+    "docs/agentic-sdlc/coordination.md": "0f9db2a86e1fd62e1bfe4a43f901d9a0c1574d1d38ce58cd9990dcd9ced6b64d",
+    "docs/agentic-sdlc/role-contracts.md": "5796c52b7fc0278b2d5d5e37e77ebb793fd7c5c8755533671987503cd1260318",
+    "scripts/coordination_protocol.py": "ba1b223b6aff88321d6a0067cebf9700a6cd871d03734b384aa78978a1ce6c4c",
+    "scripts/qa_workspace.py": "1389693de5b9b1910b5f2049fa377ae97021c50c8299c9b2d9148919fc41cf32",
+    "scripts/validate_handoff.py": "ddacb868ff6f6891c0bb0bbc33a94114120ce23a22c7f80134d7bc7cc3bda2a9"
   },
   "managed_blocks": {
     "AGENTS.md": "de7116021d068c10dee8053fadb73dccd99f8eddce3818da74cd9745fde0e22e"

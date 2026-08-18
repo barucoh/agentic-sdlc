@@ -21,6 +21,6 @@ description: Coordinate Agentic SDLC role work, durable issue-backed sessions, s
 
 12. Coordinator receives routine status from durable GitHub evidence, and direct peer messages are optional wake-ups. Return to Coordinator early only for BLOCKED, escalation, or DELIVERY_UNKNOWN. Reconcile the exact UUID before retrying unknown delivery; never duplicate an applied peer transition. If task control is unavailable, stop as blocked with a reconstructible fallback.
 
-QA runs behavioral commands in an isolated disposable workspace-write QA worktree derived from the implementation commit. It may create caches, builds, and test outputs there, but source mutation, commits, pushes, and implementation-branch changes are forbidden; record source status/diff before and after, then clean up and block on drift.
+QA runs behavioral commands in an isolated disposable workspace-write QA worktree derived from the implementation commit. It may create caches, builds, and test outputs there, but source mutation, commits, pushes, and implementation-branch changes are forbidden; invoke the repository QA workspace check for exact-head and before/after drift evidence. Codex host/task-control remains responsible for provisioning and removing the disposable worktree; report blocked if cleanup is unavailable or drift is detected.
 
 Use only `completed`, `changes_requested`, or `blocked` as handoff terminal states. `DELIVERY_UNKNOWN` is transport state only.
