@@ -319,7 +319,7 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
             errors.append("CORRECTION_ACTIVE must return to the same Implementation task")
     if state == LifecycleState.HUMAN_MERGE_READY.value and value.get("terminal_state") != "completed":
         errors.append("HUMAN_MERGE_READY requires completed non-human gates")
-    if state in {LifecycleState.IMPLEMENTATION_READY.value, LifecycleState.QA_PASSED.value, LifecycleState.REVIEW_ACCEPTED.value, LifecycleState.HUMAN_MERGE_READY.value} and not _valid_delivery_evidence(readiness, work_item, nxt):
+    if state in {LifecycleState.IMPLEMENTATION_READY.value, LifecycleState.QA_PASSED.value, LifecycleState.REVIEW_ACCEPTED.value, LifecycleState.HUMAN_MERGE_READY.value} and not _valid_delivery_evidence(readiness, work_item, nxt, require_recorded=False):
         errors.append("delivery-cell completion requires exact typed implementation, QA, and review evidence")
     if state == LifecycleState.BLOCKED.value:
         fallback = value.get("blocked_fallback")
@@ -332,28 +332,45 @@ def _valid_repository(repository: Any) -> bool:
     return isinstance(repository, str) and repository == repository.strip() and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", repository))
 
 
-def _valid_readiness_evidence(evidence: Any, work_item: dict[str, Any] | None = None) -> bool:
-    if not isinstance(evidence, dict):
+_READINESS_FIELDS = {"commit_sha", "pull_request_url", "local_gates", "ci_status", "required_checks"}
+_READINESS_EVIDENCE_FIELDS = _READINESS_FIELDS | {"implementation_evidence", "qa_evidence", "review_evidence"}
+
+
+def _valid_check_list(checks: Any) -> bool:
+    if not isinstance(checks, list) or not checks:
+        return False
+    if any(not isinstance(check, dict) or set(check) != {"name", "status"} or not isinstance(check["name"], str) or not check["name"].strip() or check["status"] != "passed" for check in checks):
+        return False
+    names = [check["name"] for check in checks]
+    return len(names) == len(set(names))
+
+
+def _valid_common_evidence(evidence: Any, work_item: dict[str, Any] | None = None) -> bool:
+    if not isinstance(evidence, dict) or set(evidence) != _READINESS_FIELDS:
         return False
     sha = evidence.get("commit_sha")
     url = evidence.get("pull_request_url")
-    checks = evidence.get("required_checks")
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
         return False
-    if not isinstance(url, str) or not re.match(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$", url):
+    if not isinstance(url, str) or not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*", url):
         return False
-    if evidence.get("local_gates") != "passed" or evidence.get("ci_status") != "passed":
-        return False
-    if not isinstance(checks, list) or not checks:
-        return False
-    names = [c.get("name") for c in checks if isinstance(c, dict)]
-    if not (len(names) == len(checks) and len(set(names)) == len(names) and all(c.get("status") == "passed" for c in checks)):
+    if evidence.get("local_gates") != "passed" or evidence.get("ci_status") != "passed" or not _valid_check_list(evidence.get("required_checks")):
         return False
     if work_item is not None:
-        if not _valid_repository(work_item.get("repository")) or (work_item.get("commit_sha") is not None and evidence.get("commit_sha") != work_item.get("commit_sha")) or (work_item.get("pull_request_url") is not None and evidence.get("pull_request_url") != work_item.get("pull_request_url")):
+        if not _valid_repository(work_item.get("repository")) or (work_item.get("commit_sha") is not None and sha != work_item.get("commit_sha")) or (work_item.get("pull_request_url") is not None and url != work_item.get("pull_request_url")):
             return False
-        expected = f"https://github.com/{work_item['repository']}/pull/"
-        if not url.startswith(expected):
+        if not url.startswith(f"https://github.com/{work_item['repository']}/pull/"):
+            return False
+    return True
+
+
+def _valid_readiness_evidence(evidence: Any, work_item: dict[str, Any] | None = None) -> bool:
+    if not isinstance(evidence, dict) or not _READINESS_FIELDS.issubset(evidence) or not set(evidence).issubset(_READINESS_EVIDENCE_FIELDS):
+        return False
+    if not _valid_common_evidence({key: evidence[key] for key in _READINESS_FIELDS}, work_item):
+        return False
+    for field, role in (("implementation_evidence", "implementation"), ("qa_evidence", "qa"), ("review_evidence", "reviewer")):
+        if field in evidence and not _valid_role_evidence(evidence[field], role, work_item):
             return False
     return True
 
@@ -369,7 +386,7 @@ def _valid_role_evidence(value: Any, role: str, work_item: dict[str, Any] | None
         isinstance(value, dict)
         and set(value) == fields
         and value.get("role") == role
-        and _valid_readiness_evidence(value, work_item)
+        and _valid_common_evidence({key: value[key] for key in _READINESS_FIELDS}, work_item)
     )
 
 
@@ -381,6 +398,7 @@ def _valid_delivery_evidence(
     recorded_implementation: dict[str, Any] | None = None,
     recorded_qa: dict[str, Any] | None = None,
     recorded_review: dict[str, Any] | None = None,
+    require_recorded: bool = True,
 ) -> bool:
     """Require role-owned evidence appropriate to the destination state."""
     if not isinstance(evidence, dict) or not _valid_readiness_evidence(evidence, work_item):
@@ -393,15 +411,16 @@ def _valid_delivery_evidence(
     if state is LifecycleState.QA_PASSED:
         return _valid_role_evidence(qa, "qa", work_item)
     if state is LifecycleState.REVIEW_ACCEPTED:
-        return _valid_role_evidence(recorded_qa, "qa", work_item) and _valid_role_evidence(reviewer, "reviewer", work_item)
+        qa_authority = recorded_qa if require_recorded else qa
+        return _valid_role_evidence(qa_authority, "qa", work_item) and _valid_role_evidence(reviewer, "reviewer", work_item)
     if state is LifecycleState.HUMAN_MERGE_READY:
         return (
             _valid_role_evidence(implementation, "implementation", work_item)
             and _valid_role_evidence(qa, "qa", work_item)
             and _valid_role_evidence(reviewer, "reviewer", work_item)
-            and _valid_role_evidence(recorded_implementation, "implementation", work_item)
-            and _valid_role_evidence(recorded_qa, "qa", work_item)
-            and _valid_role_evidence(recorded_review, "reviewer", work_item)
+            and (not require_recorded or _valid_role_evidence(recorded_implementation, "implementation", work_item))
+            and (not require_recorded or _valid_role_evidence(recorded_qa, "qa", work_item))
+            and (not require_recorded or _valid_role_evidence(recorded_review, "reviewer", work_item))
         )
     return True
 
@@ -506,6 +525,14 @@ class ArtifactBindingIntent:
     commit_sha: str
 
 
+@dataclass(frozen=True)
+class ChildDeliveryIdentity:
+    operation_id: str
+    parent_operation_id: str
+    recipient_task_key: str
+    recipient_role: str
+
+
 @dataclass
 class ChildDeliveryOperation:
     """One recipient wake-up in the unified operation UUID namespace.
@@ -515,10 +542,7 @@ class ChildDeliveryOperation:
     reconciled, and retried without replaying the parent or a sibling.
     """
 
-    operation_id: str
-    parent_operation_id: str
-    recipient_task_key: str
-    recipient_role: str
+    identity: ChildDeliveryIdentity
     state: DeliveryState = DeliveryState.PENDING
     attempt_count: int = 1
     retry_allowed: bool = False
@@ -526,9 +550,30 @@ class ChildDeliveryOperation:
     last_reconciliation: Reconciliation | None = None
     fallback: str | None = None
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "identity" and hasattr(self, "identity"):
+            raise LifecycleTransitionError("child delivery identity is immutable")
+        super().__setattr__(name, value)
+
+    @property
+    def operation_id(self) -> str:
+        return self.identity.operation_id
+
+    @property
+    def parent_operation_id(self) -> str:
+        return self.identity.parent_operation_id
+
+    @property
+    def recipient_task_key(self) -> str:
+        return self.identity.recipient_task_key
+
+    @property
+    def recipient_role(self) -> str:
+        return self.identity.recipient_role
+
     def unknown(self) -> None:
-        if self.state is DeliveryState.DELIVERED:
-            raise LifecycleTransitionError("delivered child delivery is terminal")
+        if self.state is not DeliveryState.PENDING:
+            raise LifecycleTransitionError("only the current pending child attempt may become uncertain")
         self.state = DeliveryState.DELIVERY_UNKNOWN
         self.retry_allowed = False
 
@@ -793,10 +838,12 @@ class CoordinatorLifecycle:
             if role is None:
                 raise LifecycleTransitionError("recipient delivery requires a canonical logical task key")
             self._operations[operation_id] = ChildDeliveryOperation(
-                operation_id=operation_id,
-                parent_operation_id=intent.operation_id,
-                recipient_task_key=recipient_key,
-                recipient_role=role,
+                identity=ChildDeliveryIdentity(
+                    operation_id=operation_id,
+                    parent_operation_id=intent.operation_id,
+                    recipient_task_key=recipient_key,
+                    recipient_role=role,
+                ),
             )
 
     def transition(
@@ -918,6 +965,8 @@ class TargetOperation:
     def observe(self, observation: Observation, authoritative_confirmed: bool = False) -> DeliveryState:
         if self.state is DeliveryState.DELIVERED or self.side_effect_confirmed:
             return DeliveryState.DELIVERED
+        if self.state is DeliveryState.NOT_DELIVERED:
+            raise LifecycleTransitionError("an absent delivery requires an exact retry before another attempt")
         self.attempt_count += 1
         self.retry_allowed = False
         if observation is Observation.EXPLICIT_NON_DELIVERY:
@@ -936,6 +985,8 @@ class TargetOperation:
     def reconcile(self, result: Reconciliation) -> DeliveryState:
         if self.state is DeliveryState.DELIVERED or self.side_effect_confirmed:
             return DeliveryState.DELIVERED
+        if self.state is DeliveryState.NOT_DELIVERED:
+            raise LifecycleTransitionError("an absent delivery cannot be applied without an exact retry")
         self.reconciliation_count += 1
         self.last_reconciliation = result
         self.retry_allowed = False
@@ -947,6 +998,14 @@ class TargetOperation:
             self.retry_allowed = True
         else:
             self.state = DeliveryState.DELIVERY_UNKNOWN
+        return self.state
+
+    def retry(self) -> DeliveryState:
+        if self.state is not DeliveryState.NOT_DELIVERED or not self.retry_allowed:
+            raise LifecycleTransitionError("delivery is not retryable")
+        self.state = DeliveryState.PENDING
+        self.retry_allowed = False
+        self.attempt_count += 1
         return self.state
 
     def fallback(self) -> dict[str, str]:

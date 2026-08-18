@@ -395,9 +395,55 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertEqual(lifecycle._operations[recipients["issue-5-qa"]].state, DeliveryState.PENDING)
         self.assertEqual(lifecycle.reconcile_delivery("coordinator", recipients["issue-5-reviewer"], False), LifecycleState.IMPLEMENTATION_READY)
         self.assertEqual(lifecycle._operations[recipients["issue-5-reviewer"]].state, DeliveryState.NOT_DELIVERED)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.observe_delivery_unknown("implementation", recipients["issue-5-reviewer"], target_task_key="issue-5-reviewer")
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.reconcile_delivery("coordinator", recipients["issue-5-reviewer"], Reconciliation.APPLIED)
         self.assertEqual(lifecycle.retry_delivery("implementation", recipients["issue-5-reviewer"]), DeliveryState.PENDING)
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("qa", LifecycleState.QA_PASSED, str(uuid4()), evidence, source_task_key="issue-5-qa", target_task_key="issue-5-reviewer", recipient_operation_ids={"issue-5-reviewer": str(uuid4()), "issue-5-implementation": str(uuid4())})
+
+    def test_child_delivery_identity_is_frozen_while_state_reconciles(self) -> None:
+        lifecycle = self.lifecycle()
+        evidence = {"commit_sha": "1" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
+        lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
+        parent_id = str(uuid4())
+        self.peer_transition(lifecycle, LifecycleState.IMPLEMENTATION_READY, parent_id, evidence)
+        child_id = lifecycle._operations[parent_id].recipient_operation_ids[0]
+        child = lifecycle._operations[child_id]
+        for field, replacement in (("operation_id", str(uuid4())), ("parent_operation_id", str(uuid4())), ("recipient_task_key", "issue-5-coordinator"), ("recipient_role", "coordinator")):
+            with self.subTest(field=field):
+                with self.assertRaises((AttributeError, LifecycleTransitionError, TypeError)):
+                    setattr(child, field, replacement)
+        with self.assertRaises(LifecycleTransitionError):
+            child.identity = child.identity
+        self.assertEqual(child.operation_id, child_id)
+        lifecycle.observe_delivery_unknown("implementation", child_id, target_task_key=child.recipient_task_key)
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", child_id, Reconciliation.APPLIED), LifecycleState.IMPLEMENTATION_READY)
+
+    def test_terminal_handoff_uses_its_complete_structured_evidence(self) -> None:
+        terminal = self.handoff()
+        terminal.update({
+            "lifecycle_state": "HUMAN_MERGE_READY",
+            "lifecycle_event": "DELIVERY_CELL_COMPLETED",
+            "from_role": "reviewer",
+            "to_role": "coordinator",
+            "source_task_key": "issue-1-reviewer",
+            "target_task_key": "issue-1-coordinator",
+            "recipient_task_keys": ["issue-1-coordinator"],
+            "recipient_operation_ids": ["00000000-0000-4000-8000-000000000003"],
+            "terminal_state": "completed",
+        })
+        self.assertEqual(validate_handoff(terminal), [])
+        for name, mutation in {
+            "qa changes": lambda value: value["readiness_evidence"].__setitem__("qa_status", "changes_requested"),
+            "failed check": lambda value: value["readiness_evidence"].__setitem__("required_checks", [{"name": "validate", "status": "failed"}]),
+            "unknown field": lambda value: value["readiness_evidence"].__setitem__("unexpected", True),
+        }.items():
+            with self.subTest(name=name):
+                candidate = copy.deepcopy(terminal)
+                mutation(candidate)
+                self.assertTrue(validate_handoff(candidate))
 
     def test_delivery_cell_documentation_uses_current_role_name_and_diagrams(self) -> None:
         legacy_name = "scr" + "ibe"
@@ -672,6 +718,11 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertTrue(operation.retry_allowed)
         self.assertEqual(operation.reconciliation_count, 2)
         self.assertEqual(operation.last_reconciliation, Reconciliation.ABSENT)
+        with self.assertRaises(LifecycleTransitionError):
+            operation.reconcile(Reconciliation.APPLIED)
+        self.assertEqual(operation.state, DeliveryState.NOT_DELIVERED)
+        self.assertEqual(operation.retry(), DeliveryState.PENDING)
+        self.assertEqual(operation.observe(Observation.DELIVERED_AND_ACKNOWLEDGED, authoritative_confirmed=True), DeliveryState.DELIVERED)
 
     def test_delivered_operation_is_terminal_and_cannot_be_reopened(self) -> None:
         delivered = self.operation()
