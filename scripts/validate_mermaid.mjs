@@ -29,7 +29,7 @@ try {
     const output = join(temporary, `${index}.svg`);
     writeFileSync(input, source, "utf8");
     try {
-      execFileSync(binary, ["--quiet", "--input", input, "--output", output], {
+      execFileSync(binary, ["--quiet", "--puppeteerConfigFile", join(root, "scripts", "mermaid-puppeteer.json"), "--input", input, "--output", output], {
         cwd: root,
         stdio: "pipe",
         shell: process.platform === "win32",
