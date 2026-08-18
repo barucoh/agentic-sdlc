@@ -79,9 +79,9 @@
     "is_correction": { "type": "boolean" },
     "lifecycle_state": {
       "type": "string",
-      "enum": ["IMPLEMENTATION_ACTIVE", "IMPLEMENTATION_READY", "REVIEW_ACTIVE", "CHANGES_REQUESTED", "CORRECTION_ACTIVE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED", "DELIVERY_UNKNOWN"]
+      "enum": ["IMPLEMENTATION_ACTIVE", "IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVE", "CHANGES_REQUESTED", "CORRECTION_ACTIVE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED", "DELIVERY_UNKNOWN"]
     },
-    "lifecycle_event": { "type": "string", "enum": ["IMPLEMENTATION_READY", "REVIEW_ACTIVATE", "CHANGES_REQUESTED", "CORRECTION_ACTIVATE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED"] },
+    "lifecycle_event": { "type": "string", "enum": ["IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVATE", "CHANGES_REQUESTED", "CORRECTION_ACTIVATE", "REVIEW_ACCEPTED", "DELIVERY_CELL_COMPLETED", "HUMAN_MERGE_READY", "BLOCKED", "ESCALATION"] },
     "source_task_key": { "type": "string", "pattern": "^issue-[1-9][0-9]*-[a-z][a-z0-9-]*$" },
     "target_task_key": { "type": "string", "pattern": "^issue-[1-9][0-9]*-[a-z][a-z0-9-]*$" },
     "readiness_evidence": {

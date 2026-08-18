@@ -88,8 +88,8 @@ ROUTING_CONFIG_LINES = (
     '  ephemeral_research: "gpt-5.6-luna/Low|gpt-5.6-terra/Low|gpt-5.6-sol/exceptional-rationale"',
 )
 LIFECYCLE_CONFIG_LINES = (
-    "lifecycle_policy: coordinator-owned-v1",
-    'lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"',
+    "lifecycle_policy: delivery-cell-v1",
+    'lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"',
     "lifecycle_transport_states: BLOCKED, DELIVERY_UNKNOWN",
 )
 
@@ -217,13 +217,16 @@ def lifecycle_tuple(issue: int, current: LifecycleState, nxt: LifecycleState, ev
     if event is None:
         return None
     pairs = {
-        (LifecycleState.IMPLEMENTATION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): ("implementation", "coordinator"),
-        (LifecycleState.CORRECTION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): ("implementation", "coordinator"),
-        (LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE): ("coordinator", "reviewer"),
-        (LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED): ("reviewer", "coordinator"),
-        (LifecycleState.REVIEW_ACTIVE, LifecycleState.REVIEW_ACCEPTED): ("reviewer", "coordinator"),
-        (LifecycleState.CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): ("coordinator", "implementation"),
-        (LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY): ("coordinator", "human_owner"),
+        (LifecycleState.IMPLEMENTATION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): ("implementation", "qa"),
+        (LifecycleState.CORRECTION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): ("implementation", "qa"),
+        (LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_PASSED): ("qa", "reviewer"),
+        (LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_CHANGES_REQUESTED): ("qa", "implementation"),
+        (LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACTIVE): ("qa", "reviewer"),
+        (LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED): ("reviewer", "implementation"),
+        (LifecycleState.REVIEW_ACTIVE, LifecycleState.REVIEW_ACCEPTED): ("reviewer", "reviewer"),
+        (LifecycleState.QA_CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): ("qa", "implementation"),
+        (LifecycleState.CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): ("reviewer", "implementation"),
+        (LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY): ("reviewer", "coordinator"),
         (LifecycleState.IMPLEMENTATION_ACTIVE, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
         (LifecycleState.IMPLEMENTATION_READY, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
         (LifecycleState.REVIEW_ACTIVE, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
@@ -235,9 +238,9 @@ def lifecycle_tuple(issue: int, current: LifecycleState, nxt: LifecycleState, ev
     if not roles:
         return None
     events = {
-        LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE",
+        LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.QA_PASSED: "QA_PASSED", LifecycleState.QA_CHANGES_REQUESTED: "QA_CHANGES_REQUESTED", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE",
         LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE",
-        LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "HUMAN_MERGE_READY",
+        LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "DELIVERY_CELL_COMPLETED",
         LifecycleState.BLOCKED: "BLOCKED",
     }
     if events.get(nxt) != event:
@@ -365,6 +368,8 @@ class Reconciliation(str, Enum):
 class LifecycleState(str, Enum):
     IMPLEMENTATION_ACTIVE = "IMPLEMENTATION_ACTIVE"
     IMPLEMENTATION_READY = "IMPLEMENTATION_READY"
+    QA_PASSED = "QA_PASSED"
+    QA_CHANGES_REQUESTED = "QA_CHANGES_REQUESTED"
     REVIEW_ACTIVE = "REVIEW_ACTIVE"
     CHANGES_REQUESTED = "CHANGES_REQUESTED"
     CORRECTION_ACTIVE = "CORRECTION_ACTIVE"
@@ -438,13 +443,21 @@ class ArtifactBindingIntent:
 
 
 class CoordinatorLifecycle:
-    """Coordinator-owned lifecycle; role completion never terminally completes it."""
+    """Delivery-cell lifecycle with Coordinator supervision, not message relaying.
+
+    The `actor` for a normal transition or unknown observation is the peer that
+    owns the transition's source logical key.  Coordinator reconciles uncertain
+    transport and receives the terminal cell result, but is deliberately not an
+    alternate sender for routine Implementation, QA, or Reviewer handoffs.
+    """
 
     _TRANSITIONS = {
         LifecycleState.IMPLEMENTATION_ACTIVE: {LifecycleState.IMPLEMENTATION_READY},
-        LifecycleState.IMPLEMENTATION_READY: {LifecycleState.REVIEW_ACTIVE},
+        LifecycleState.IMPLEMENTATION_READY: {LifecycleState.QA_PASSED, LifecycleState.QA_CHANGES_REQUESTED},
+        LifecycleState.QA_PASSED: {LifecycleState.REVIEW_ACTIVE},
         LifecycleState.REVIEW_ACTIVE: {LifecycleState.CHANGES_REQUESTED, LifecycleState.REVIEW_ACCEPTED},
         LifecycleState.CHANGES_REQUESTED: {LifecycleState.CORRECTION_ACTIVE},
+        LifecycleState.QA_CHANGES_REQUESTED: {LifecycleState.CORRECTION_ACTIVE},
         LifecycleState.CORRECTION_ACTIVE: {LifecycleState.IMPLEMENTATION_READY},
         LifecycleState.REVIEW_ACCEPTED: {LifecycleState.HUMAN_MERGE_READY},
     }
@@ -455,6 +468,7 @@ class CoordinatorLifecycle:
         self.issue_number = self.work_item.issue_number
         self.coordinator_key = f"issue-{self.issue_number}-coordinator"
         self.implementation_key = f"issue-{self.issue_number}-implementation"
+        self.qa_key = f"issue-{self.issue_number}-qa"
         self.reviewer_key = f"issue-{self.issue_number}-reviewer"
         self._artifact: tuple[str, str, str] | None = None
         self._artifact_revisions: list[tuple[str, str, str]] = []
@@ -475,6 +489,15 @@ class CoordinatorLifecycle:
     def _direction(self, current: LifecycleState, nxt: LifecycleState, source: str, target: str, event: str | None = None) -> bool:
         allowed = lifecycle_tuple(self.issue_number, current, nxt, event)
         return bool(allowed and allowed[2:] == (source, target))
+
+    @staticmethod
+    def _role_for_task_key(task_key: str) -> str | None:
+        match = re.fullmatch(r"issue-[1-9][0-9]*-([a-z][a-z0-9-]*)", task_key)
+        return match.group(1).replace("-", "_") if match else None
+
+    def _require_peer_actor(self, actor: str, source_task_key: str) -> None:
+        if actor != self._role_for_task_key(source_task_key):
+            raise LifecycleTransitionError("delivery-cell transition actor must own the source logical task key")
 
     def bind_delivery_artifact(self, operation_id: str, pull_request_url: str | None, commit_sha: str | None) -> None:
         """Atomically and immutably bind the PR/SHA authority for readiness."""
@@ -517,11 +540,13 @@ class CoordinatorLifecycle:
     def _event_for(next_state: LifecycleState) -> str | None:
         return {
             LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY",
+            LifecycleState.QA_PASSED: "QA_PASSED",
+            LifecycleState.QA_CHANGES_REQUESTED: "QA_CHANGES_REQUESTED",
             LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE",
             LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED",
             LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE",
             LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED",
-            LifecycleState.HUMAN_MERGE_READY: "HUMAN_MERGE_READY",
+            LifecycleState.HUMAN_MERGE_READY: "DELIVERY_CELL_COMPLETED",
             LifecycleState.BLOCKED: "BLOCKED",
         }.get(next_state)
 
@@ -628,8 +653,6 @@ class CoordinatorLifecycle:
         event: str | None = None,
         fallback: dict[str, Any] | None = None,
     ) -> LifecycleState:
-        if actor != "coordinator":
-            raise LifecycleTransitionError("Coordinator is the sole lifecycle owner")
         if not self._valid_operation(operation_id):
             raise LifecycleTransitionError("lifecycle transitions require a UUID operation ID")
         if next_state is LifecycleState.BLOCKED:
@@ -645,6 +668,7 @@ class CoordinatorLifecycle:
         event = event or self._event_for(next_state)
         if event is None:
             raise LifecycleTransitionError("lifecycle event is required")
+        self._require_peer_actor(actor, source_task_key)
         intent = self._build_transition_intent(operation_id, next_state, source_task_key, target_task_key, event, evidence, fallback)
         self._validate_transition_intent(intent)
         prior = self._operations.get(operation_id)
@@ -660,8 +684,6 @@ class CoordinatorLifecycle:
         return self._apply_transition_intent(intent)
 
     def observe_delivery_unknown(self, actor: str, operation_id: str, intended_state: LifecycleState, evidence: dict[str, Any] | None = None, *, source_task_key: str | None = None, target_task_key: str | None = None, event: str | None = None, fallback: dict[str, Any] | None = None) -> LifecycleState:
-        if actor != "coordinator":
-            raise LifecycleTransitionError("Coordinator is the sole lifecycle owner")
         if not self._valid_operation(operation_id):
             raise LifecycleTransitionError("lifecycle transitions require a UUID operation ID")
         if operation_id in self._operations:
@@ -679,6 +701,7 @@ class CoordinatorLifecycle:
         event = event or self._event_for(intended_state)
         if event is None:
             raise LifecycleTransitionError("lifecycle event is required")
+        self._require_peer_actor(actor, source_task_key)
         intent = self._build_transition_intent(operation_id, intended_state, source_task_key, target_task_key, event, evidence, fallback)
         self._validate_transition_intent(intent, require_prerequisites=False)
         self._operations[operation_id] = intent
@@ -688,7 +711,7 @@ class CoordinatorLifecycle:
 
     def reconcile_delivery(self, actor: str, operation_id: str, applied: bool) -> LifecycleState:
         if actor != "coordinator":
-            raise LifecycleTransitionError("Coordinator is the sole lifecycle owner")
+            raise LifecycleTransitionError("Coordinator supervises delivery reconciliation")
         if self._unknown is None or self._unknown != operation_id:
             raise LifecycleTransitionError("exact DELIVERY_UNKNOWN operation must be reconciled")
         intent = self._operations.get(operation_id)

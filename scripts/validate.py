@@ -113,9 +113,9 @@ for path in sorted(agent_root.glob("*.toml")):
     if role_name in ROLE_CODES and f"Session role code: {ROLE_CODES[role_name]}." not in value.get("developer_instructions", ""):
         errors.append(f"agent contract has incorrect session role code in {path.relative_to(ROOT)}")
     lifecycle_requirements = {
-        "coordinator": "Coordinator alone owns",
-        "implementation": "Report IMPLEMENTATION_READY only through Coordinator",
-        "reviewer": "Reviewer activates only from Coordinator",
+        "coordinator": "Supervise watchdogs and reconcile GitHub",
+        "implementation": "Send IMPLEMENTATION_READY directly to the bound QA and Reviewer",
+        "reviewer": "Reviewer is the delivery-cell verification lead",
     }
     required_lifecycle = lifecycle_requirements.get(role_name)
     if required_lifecycle and required_lifecycle not in value.get("developer_instructions", ""):
@@ -132,6 +132,14 @@ if SESSION_TITLE_FORMAT != "#{issue_number} {role_code} - {issue_title}":
     errors.append("canonical session-title format changed unexpectedly")
 if (template_root / ".codex/config.toml").exists():
     errors.append("generated repository must not use obsolete .codex/config.toml role registry")
+
+for path in ROOT.rglob("*"):
+    if path.is_file() and ".git" not in path.parts:
+        try:
+            if re.search(r"\bscribe\b", path.read_text(encoding="utf-8"), re.IGNORECASE):
+                errors.append(f"legacy role name occurs in {path.relative_to(ROOT)}")
+        except UnicodeDecodeError:
+            continue
 
 schema_path = template_root / ".agentic-sdlc/handoff.schema.json"
 template_path = template_root / ".agentic-sdlc/handoff-template.json"

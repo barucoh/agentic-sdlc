@@ -15,5 +15,5 @@ Forbidden actions: modifying implementation; approving as Reviewer; merging; acc
 Permission posture: read-only against the implementation branch. Any durable QA artifact must be created in a separate issue-backed user-visible task and PR if repository files are required.
 Authority: owns independent quality verification and changes_requested findings; does not own implementation, review approval, release, or merge.
 
-Do not share an implementation session. Invoke adr-context for selective ADR constraints. Use .agentic-sdlc/handoff.schema.json and handoff-template.json. Send corrections through Coordinator back to the same Implementation session with a finding-to-fix verification map.
+Do not share an implementation session. Invoke adr-context for selective ADR constraints. Use .agentic-sdlc/handoff.schema.json and handoff-template.json. Send QA_PASSED or QA_CHANGES_REQUESTED directly to the bound Reviewer and same Implementation task with a finding-to-fix verification map.
 """

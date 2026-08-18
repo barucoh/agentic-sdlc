@@ -1,46 +1,65 @@
 <!-- agentic-sdlc:managed coordination/v1 -->
 # Coordination and delivery resilience
 
-## Durable authority
+## Durable authority and delivery cell
 
-GitHub issues, pull requests, commits, review comments, ADRs, and committed canonical documentation are authoritative. Chat or cross-task messages are transport only. Thread IDs are machine-local hints and must never be committed or used as the only recovery key.
+GitHub issues, pull requests, commits, checks, review comments, ADRs, and committed canonical documentation are authoritative. Native task messages are wake-up optimizations only; machine-local task handles are never committed. Every file-producing, durable-artifact-producing, decision-heavy, release, high-importance, or risk-bearing action uses its own issue-backed, user-visible task, worktree, branch, and PR. Ephemeral subagents are bounded read-only research only.
 
-Any file-producing, durable-artifact-producing, decision-heavy, release, high-importance, or risk-bearing task uses one authoritative issue, one user-visible task, one worktree, one branch, and one pull request. Ephemeral subagents are limited to bounded read-only research, discovery, log analysis, documentation lookup, or evidence gathering. They must use a read-only sandbox, make no file or external-state changes, and return concise evidence.
+Coordinator establishes authoritative issue scope, creates or binds the dedicated Implementation, QA, and Reviewer tasks, provides their local handles, and supervises the delivery cell. Coordinator watches, reconciles GitHub, and handles `BLOCKED`, escalation, or `DELIVERY_UNKNOWN`; it is not the routine message relay or specialist decision owner.
 
-## Session titles
+```mermaid
+flowchart LR
+  CO["CO Coordinator: scope, cell binding, watchdog"]
+  IM["IM Implementation: PR and exact SHA"]
+  QA["QA: independent acceptance verification"]
+  RV["RV Reviewer: delivery-cell verification lead"]
+  KS["KS Knowledge Steward: canonical knowledge"]
+  GH[("GitHub durable authority")]
+  CO --> IM & QA & RV
+  IM -->|IMPLEMENTATION_READY| QA & RV
+  QA -->|QA_PASSED or QA_CHANGES_REQUESTED| RV & IM
+  RV -->|CHANGES_REQUESTED| IM
+  RV -->|DELIVERY_CELL_COMPLETED| CO
+  IM & QA & RV & KS --> GH
+  GH -.reconcile uncertain transport.-> CO
+```
 
-Name every new user-visible task `#<issue number> <role code> - <issue title>`. The stable codes are `CO` Coordinator, `PD` Product, `AR` Architecture, `IM` Implementation, `QA` QA, `RV` Reviewer, and `KS` Knowledge Steward. Reject unknown codes rather than inventing one.
+## Native delivery-cell lifecycle
 
-The complete title may contain at most 36 Unicode characters, including the prefix, spaces, hyphen, and ellipsis. Build `#<issue_number> <role_code> - ` first. If the complete title is too long, truncate only the issue-title segment and end it with one Unicode ellipsis `…`. Do not include `project_name`; it remains available for other repository metadata. Apply this rule prospectively. Repository migrations do not rename existing sessions unless a user explicitly requests it.
+Implementation sends `IMPLEMENTATION_READY` with exact PR/SHA and passed local/CI evidence directly to QA and Reviewer. QA sends `QA_PASSED` or `QA_CHANGES_REQUESTED` directly to Reviewer and Implementation. Reviewer leads verification: it consolidates findings, sends `CHANGES_REQUESTED` directly to the same Implementation task, receives the corrected readiness handoff, and reactivates QA when changed acceptance behavior requires recheck. When QA has passed and Reviewer has no actionable findings at the same exact PR/SHA, Reviewer sends `DELIVERY_CELL_COMPLETED` / `HUMAN_MERGE_READY` directly to Coordinator. Human approval and merge remain explicit.
 
-## Cross-task operation protocol
+```mermaid
+stateDiagram-v2
+  [*] --> IMPLEMENTATION_ACTIVE
+  IMPLEMENTATION_ACTIVE --> IMPLEMENTATION_READY: IM -> QA/RV
+  IMPLEMENTATION_READY --> QA_PASSED: QA -> RV/IM
+  IMPLEMENTATION_READY --> QA_CHANGES_REQUESTED: QA -> IM/RV
+  QA_PASSED --> REVIEW_ACTIVE: RV verification
+  REVIEW_ACTIVE --> CHANGES_REQUESTED: RV -> IM
+  QA_CHANGES_REQUESTED --> CORRECTION_ACTIVE: IM correction
+  CHANGES_REQUESTED --> CORRECTION_ACTIVE: IM correction
+  CORRECTION_ACTIVE --> IMPLEMENTATION_READY: IM -> QA/RV, new SHA
+  REVIEW_ACTIVE --> REVIEW_ACCEPTED: RV, QA passed
+  REVIEW_ACCEPTED --> HUMAN_MERGE_READY: RV -> CO DELIVERY_CELL_COMPLETED
+  IMPLEMENTATION_ACTIVE --> BLOCKED
+  IMPLEMENTATION_READY --> BLOCKED
+  QA_PASSED --> BLOCKED
+  REVIEW_ACTIVE --> BLOCKED
+  CORRECTION_ACTIVE --> BLOCKED
+  DELIVERY_UNKNOWN --> IMPLEMENTATION_READY: reconcile applied
+  DELIVERY_UNKNOWN --> CORRECTION_ACTIVE: reconcile absent/retry
+```
 
-Every durable handoff includes explicit `target_model`, `effort`, and one-sentence `rationale`; task creation and activation must pass them explicitly and may not inherit a coordinator or system default. The repository-native matrix is encoded in the handoff validator and `.agentic-sdlc/config.yaml`: decision/orchestration roles use Sol/Medium, routine implementation and Knowledge Steward work use Luna/Low, nontrivial implementation may use Terra with explicit risk/complexity justification for higher effort, and QA/Reviewer use Sol/Medium with explicit high-risk rationale for High. Ephemeral research is always read-only and uses Luna/Low by default, Terra/Low for unusually complex synthesis, or Sol only with explicit exceptional rationale.
+Every peer operation has a UUID, 20-30 second watchdog, per-target record, exact operation reconciliation before retry, `DELIVERY_UNKNOWN` for uncertainty, and a GitHub-reconstructible copy/paste fallback. An unknown peer wake-up recovers from durable GitHub evidence without duplicating a transition. Delivered/applied operations are terminal and immutable.
 
-## Coordinator-owned lifecycle
+## Native primitives decision
 
-Coordinator is the sole lifecycle owner and message router. Implementation and Reviewer do not conduct an uncontrolled peer-to-peer loop, and Coordinator remains active after Implementation completion.
+Native Codex dedicated user-visible tasks plus task messaging and bounded waits are the primary runtime mechanism. Hooks are optional local guardrails: `Stop` can continue the current turn and `PostToolUse` can inspect supported local tool calls, but hooks are not a durable cross-task event bus and a background hook finishing while idle does not start a turn. The Codex SDK can start, continue, and resume local threads, but a separate programmatic orchestrator would add runtime code, dependencies, and machine-local task management; it is not an MVP/plugin dependency. Agents SDK or MCP orchestration is a future standalone-service extension only.
 
-The deterministic lifecycle is `IMPLEMENTATION_ACTIVE -> IMPLEMENTATION_READY -> REVIEW_ACTIVE -> (CHANGES_REQUESTED -> CORRECTION_ACTIVE -> IMPLEMENTATION_READY -> REVIEW_ACTIVE)* -> REVIEW_ACCEPTED -> HUMAN_MERGE_READY`. `BLOCKED` and `DELIVERY_UNKNOWN` are transport handling states, not permission to silently finish.
+Official references: [Hooks](https://learn.chatgpt.com/docs/hooks), [Codex SDK](https://learn.chatgpt.com/docs/codex-sdk), and [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents).
 
-`IMPLEMENTATION_READY` requires durable GitHub evidence, the exact commit SHA, PR URL, local-gate results, and CI status. Coordinator observes Implementation completion through bounded host monitoring when available, reconciles GitHub, and explicitly activates the existing Reviewer task (creating it once only if absent) with Sol/Medium and the exact SHA. Reviewer returns completed, changes_requested, or blocked with durable PR/review evidence. Changes_requested returns a finding-to-fix map to the same Implementation task using Luna or Terra, then the corrected exact SHA and green gates reactivate the same Reviewer task. Coordinator returns to the user only after REVIEW_ACCEPTED and all non-human gates are green, or after genuine blocked authority. If host task-control tools are unavailable, Coordinator stops as blocked with a reconstructible handoff.
+## Session titles and routing
 
-1. Generate one UUID operation ID before every cross-task action and include it in the versioned handoff.
-   Replace the zero UUID in `handoff-template.json`; it is a schema-valid placeholder, never an operation ID to reuse.
-2. Persist the requested outcome in an authoritative GitHub issue, PR, review comment, or commit before relying on an optional wake-up message.
-3. Track state independently per target. Never let one target acknowledgement complete or fail another target.
-4. Send the optional message with a bounded 20–30 second watchdog; the configured default is 25 seconds.
-5. Acknowledgement completes transport only after the authoritative state is confirmed.
-6. Explicit authoritative non-delivery may be reported as not delivered only before uncertainty exists. Timeout, handler failure, or delivered-but-acknowledgement-failed yields `DELIVERY_UNKNOWN`, never `FAILED`; a later transport observation cannot make that operation retryable.
-7. Before retrying any side effect, record reconciliation of the exact operation ID against the target task and authoritative GitHub state. Only a recorded `ABSENT` result may transition `DELIVERY_UNKNOWN` to retryable `NOT_DELIVERED`. If already applied, record terminal success without repeating it. A delivered or applied operation is immutable and cannot be reopened. If reconciliation is unavailable or ambiguous, stop and preserve `DELIVERY_UNKNOWN`.
-8. Preserve the per-target operation record and provide a copy/paste fallback containing repository, issue/PR URL, operation ID, objective, expected output, evidence, and next owner. The fallback must be reconstructible from GitHub without a thread ID.
+Name every new user-visible task `#<issue number> <role code> - <issue title>` using `CO`, `PD`, `AR`, `IM`, `QA`, `RV`, or `KS`; reject unknown codes. The maximum full title is 36 Unicode characters; truncate only the issue-title segment and end it with one `…`.
 
-Duplicate operation IDs are idempotency keys. A target must not perform the same side effect twice.
-
-## Correction loop
-
-QA or Reviewer returns `changes_requested` through Coordinator. Every finding identifies an ID, evidence, expected correction, and verification. Coordinator sends the correction to the same issue-backed Implementation task. Implementation returns a finding-to-fix map with changed files or commits and exact verification. QA and Reviewer then independently re-check their findings. Implementation never approves its own correction.
-
-## Terminal and transport states
-
-Handoff terminal states are `completed`, `changes_requested`, and `blocked`. Transport may additionally report `DELIVERY_UNKNOWN`. Transport uncertainty does not change the underlying work state and must be reconciled before side effects are retried.
+Every durable handoff carries explicit target model, effort, and one-sentence rationale. Coordinator/Product/Architecture use Sol/Medium by default, routine Implementation and Knowledge Steward use Luna/Low, QA/Reviewer use Sol/Medium, and corrections return to the same Implementation task using Luna or Terra. Handoff terminal states are `completed`, `changes_requested`, and `blocked`; transport may additionally report `DELIVERY_UNKNOWN`.

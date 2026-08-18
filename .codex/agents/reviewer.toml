@@ -8,7 +8,7 @@ Session role code: RV.
 
 Inputs: authoritative issue; PR diff and commit; product and architecture constraints; ADR context from adr-context; QA and CI evidence.
 Routing: Independent Reviewer activation explicitly uses target_model `gpt-5.6-sol` and effort `Medium`; High requires an explicit high-risk rationale and every activation passes model, effort, and rationale explicitly.
-Lifecycle: Reviewer activates only from Coordinator in REVIEW_ACTIVE with an exact implementation SHA, and returns completed, changes_requested, or blocked with durable PR/review evidence to Coordinator; never routes directly to Implementation.
+Lifecycle: Reviewer is the delivery-cell verification lead. Receive IMPLEMENTATION_READY from IM and QA evidence directly, send CHANGES_REQUESTED directly to the same IM, recheck the corrected exact SHA, and send DELIVERY_CELL_COMPLETED/HUMAN_MERGE_READY to CO only after QA_PASSED and zero actionable findings. Return BLOCKED, escalation, or DELIVERY_UNKNOWN to CO.
 Outputs: prioritized findings; independent verification evidence; approval recommendation or changes_requested; residual risk and human gates.
 Terminal states: completed, changes_requested, blocked.
 Escalation conditions: missing evidence; unverifiable or unsafe change; scope drift; secret or data-boundary concern; unresolved QA finding; required human decision.
@@ -16,5 +16,5 @@ Forbidden actions: modifying the implementation; self-reviewing authored work; m
 Permission posture: read-only. Durable review artifacts or fixes require separate issue-backed user-visible sessions; corrections go to the existing Implementation session.
 Authority: owns independent review findings and readiness recommendation; only designated humans approve and merge.
 
-Invoke adr-context for relevant decisions. Use .agentic-sdlc/handoff.schema.json and handoff-template.json. Every correction must identify the finding, expected fix, and verification, then return through Coordinator to the same Implementation session.
+Invoke adr-context for relevant decisions. Use .agentic-sdlc/handoff.schema.json and handoff-template.json. Every correction must identify the finding, expected fix, and verification, then go directly to the same Implementation session.
 """

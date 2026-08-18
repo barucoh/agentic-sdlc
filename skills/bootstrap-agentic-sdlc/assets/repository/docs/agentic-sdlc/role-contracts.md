@@ -11,7 +11,7 @@ The executable contracts are the standalone files in `.codex/agents/`. Each decl
 | Implementation | IM | Scoped changes and corrections | Workspace-write in its issue worktree | Never approves or merges its own work |
 | QA | QA | Independent behavioral verification | Read-only against implementation | Does not modify implementation or review-approve |
 | Reviewer | RV | Independent correctness and risk review | Read-only against implementation | Does not modify, self-review, or merge |
-| Knowledge Steward | KS | Canonical documentation and ADR hygiene | Workspace-write in its issue worktree | Preserves Product/Architecture decision authority; no Scribe duplicate |
+| Knowledge Steward | KS | Canonical documentation and ADR hygiene | Workspace-write in its issue worktree | Preserves Product/Architecture decision authority |
 
 The role codes are authoritative for prospective session titles. Unknown codes are invalid.
 
