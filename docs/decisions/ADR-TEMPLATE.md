@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: YYYY-MM-DD
 - Tags: tag-one, tag-two
-- Load when: Describe the affected work precisely.
+- Load when: Detail the affected work precisely.
 
 ## Context
 

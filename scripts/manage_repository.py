@@ -394,7 +394,10 @@ def apply(target: Path, writes: dict[Path, str], delete_obsolete: str | None, pr
     manifest = target / MANIFEST_PATH
     manifest.parent.mkdir(parents=True, exist_ok=True)
     desired_manifest = desired_manifest_text(project_name).encode("utf-8")
-    if not manifest.exists() or manifest.read_bytes() != desired_manifest:
+    # Managed hashes and plan comparisons are newline-normalized.  Preserve a
+    # semantically equal existing manifest byte-for-byte so a Windows CRLF
+    # no-op apply cannot dirty a checkout solely by normalizing line endings.
+    if not manifest.exists() or digest_bytes(manifest.read_bytes()) != digest_bytes(desired_manifest):
         manifest.write_bytes(desired_manifest)
 
 

@@ -20,19 +20,20 @@ for (const file of files) {
 if (!blocks.length) throw new Error("No committed Mermaid blocks found");
 
 const temporary = mkdtempSync(join(tmpdir(), "agentic-sdlc-mermaid-"));
-const binary = process.platform === "win32"
-  ? join(root, "node_modules", ".bin", "mmdc.cmd")
-  : join(root, "node_modules", ".bin", "mmdc");
+// Run the pinned package entry with this exact Node runtime.  Calling the
+// platform shim requires shell spawning on Windows and emits deprecation
+// warnings; the package's JavaScript entry is portable without a shell.
+const cli = join(root, "node_modules", "@mermaid-js", "mermaid-cli", "src", "cli.js");
 try {
   blocks.forEach(({ file, source }, index) => {
     const input = join(temporary, `${index}.mmd`);
     const output = join(temporary, `${index}.svg`);
     writeFileSync(input, source, "utf8");
     try {
-      execFileSync(binary, ["--quiet", "--puppeteerConfigFile", join(root, "scripts", "mermaid-puppeteer.json"), "--input", input, "--output", output], {
+      execFileSync(process.execPath, [cli, "--quiet", "--puppeteerConfigFile", join(root, "scripts", "mermaid-puppeteer.json"), "--input", input, "--output", output], {
         cwd: root,
         stdio: "pipe",
-        shell: process.platform === "win32",
+        shell: false,
       });
     } catch (error) {
       const detail = error.stderr?.toString() || error.message;

@@ -8,7 +8,7 @@ Session role code: IM.
 
 Inputs: authoritative issue; accepted product and architecture constraints; applicable AGENTS.md; ADR context from adr-context; acceptance criteria; correction findings.
 Routing: Documentation, template, configuration, and straightforward implementation uses target_model `gpt-5.6-luna` and effort `Low` by default. Nontrivial work may use `gpt-5.6-terra` with Low by default; Medium or High requires an explicit risk/complexity rationale and Sol is not an implementation route.
-Lifecycle: Send IMPLEMENTATION_READY directly to the bound QA and Reviewer tasks with durable GitHub evidence, exact commit SHA, PR URL, local gates, and CI. Receive QA or Reviewer corrections directly in this same task; never approve or merge.
+Lifecycle: Send IMPLEMENTATION_READY directly to the bound QA and Reviewer tasks as one lifecycle event with durable GitHub evidence, exact commit SHA, PR URL, local gates, CI, and one child delivery UUID per recipient. A recipient timeout is a per-target DELIVERY_UNKNOWN overlay and must be reconciled without replaying the lifecycle event. Receive QA or Reviewer corrections directly in this same task; never approve or merge.
 Outputs: scoped code or documentation changes; tests; commit and draft PR; exact verification evidence; finding-to-fix map for corrections; residual risk.
 Terminal states: completed, changes_requested, blocked.
 Escalation conditions: unclear acceptance criteria; conflict with ADR or repository policy; required authority expansion; unrelated worktree changes; unreconciled external side effect; verification that cannot run.

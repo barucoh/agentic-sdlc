@@ -41,6 +41,7 @@ SUPPORTED_SCHEMA_KEYWORDS = {
     "pattern",
     "format",
     "minLength",
+    "minItems",
     "minimum",
     "maximum",
     "items",
@@ -91,7 +92,7 @@ ROUTING_CONFIG_LINES = (
 LIFECYCLE_CONFIG_LINES = (
     "lifecycle_policy: delivery-cell-v1",
     'lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"',
-    "lifecycle_transport_states: BLOCKED, DELIVERY_UNKNOWN",
+    "lifecycle_transport_overlay: per-recipient DELIVERY_UNKNOWN",
 )
 
 
@@ -229,7 +230,7 @@ def lifecycle_routes(issue: int, current: LifecycleState, nxt: LifecycleState, e
         (LifecycleState.CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): ("reviewer", ("implementation",)),
         (LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY): ("reviewer", ("coordinator",)),
     }
-    if nxt in {LifecycleState.BLOCKED, LifecycleState.ESCALATED, LifecycleState.DELIVERY_UNKNOWN}:
+    if nxt in {LifecycleState.BLOCKED, LifecycleState.ESCALATED}:
         roles = tuple((role, ("coordinator",)) for role in ("implementation", "qa", "reviewer", "coordinator"))
     else:
         pair = pairs.get((current, nxt))
@@ -240,7 +241,7 @@ def lifecycle_routes(issue: int, current: LifecycleState, nxt: LifecycleState, e
         LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.QA_PASSED: "QA_PASSED", LifecycleState.QA_CHANGES_REQUESTED: "QA_CHANGES_REQUESTED", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE",
         LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE",
         LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "DELIVERY_CELL_COMPLETED",
-        LifecycleState.BLOCKED: "BLOCKED", LifecycleState.ESCALATED: "ESCALATED", LifecycleState.DELIVERY_UNKNOWN: "DELIVERY_UNKNOWN",
+        LifecycleState.BLOCKED: "BLOCKED", LifecycleState.ESCALATED: "ESCALATED",
     }
     if events.get(nxt) != event:
         return ()
@@ -287,7 +288,7 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
     except ValueError:
         return ["unknown lifecycle state"]
     allowed = [item for current in LifecycleState for item in lifecycle_routes(issue, current, nxt, value.get("lifecycle_event"))]
-    if state not in {LifecycleState.IMPLEMENTATION_ACTIVE.value, LifecycleState.DELIVERY_UNKNOWN.value} and not any(
+    if state != LifecycleState.IMPLEMENTATION_ACTIVE.value and not any(
         value.get("from_role") == src and value.get("to_role") == targets[0] and value.get("source_task_key") == source_key and value.get("target_task_key") == target_keys[0]
         for src, targets, source_key, target_keys in allowed
     ):
@@ -318,7 +319,7 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
             errors.append("CORRECTION_ACTIVE must return to the same Implementation task")
     if state == LifecycleState.HUMAN_MERGE_READY.value and value.get("terminal_state") != "completed":
         errors.append("HUMAN_MERGE_READY requires completed non-human gates")
-    if state in {LifecycleState.QA_PASSED.value, LifecycleState.REVIEW_ACCEPTED.value, LifecycleState.HUMAN_MERGE_READY.value} and not _valid_delivery_evidence(readiness, work_item, nxt):
+    if state in {LifecycleState.IMPLEMENTATION_READY.value, LifecycleState.QA_PASSED.value, LifecycleState.REVIEW_ACCEPTED.value, LifecycleState.HUMAN_MERGE_READY.value} and not _valid_delivery_evidence(readiness, work_item, nxt):
         errors.append("delivery-cell completion requires exact typed implementation, QA, and review evidence")
     if state == LifecycleState.BLOCKED.value:
         fallback = value.get("blocked_fallback")
@@ -357,15 +358,52 @@ def _valid_readiness_evidence(evidence: Any, work_item: dict[str, Any] | None = 
     return True
 
 
-def _valid_delivery_evidence(evidence: Any, work_item: dict[str, Any] | None, state: "LifecycleState") -> bool:
-    if not _valid_readiness_evidence(evidence, work_item):
+def _valid_role_evidence(value: Any, role: str, work_item: dict[str, Any] | None) -> bool:
+    """Validate a role-owned, exact-artifact evidence object.
+
+    Role evidence deliberately repeats the authoritative artifact and gates.  A
+    prose URL is not sufficient authority for a delivery-cell decision.
+    """
+    fields = {"role", "pull_request_url", "commit_sha", "local_gates", "ci_status", "required_checks"}
+    return (
+        isinstance(value, dict)
+        and set(value) == fields
+        and value.get("role") == role
+        and _valid_readiness_evidence(value, work_item)
+    )
+
+
+def _valid_delivery_evidence(
+    evidence: Any,
+    work_item: dict[str, Any] | None,
+    state: "LifecycleState",
+    *,
+    recorded_implementation: dict[str, Any] | None = None,
+    recorded_qa: dict[str, Any] | None = None,
+    recorded_review: dict[str, Any] | None = None,
+) -> bool:
+    """Require role-owned evidence appropriate to the destination state."""
+    if not isinstance(evidence, dict) or not _valid_readiness_evidence(evidence, work_item):
         return False
-    required = ("implementation_evidence", "qa_evidence", "review_evidence")
-    if any(not isinstance(evidence.get(field), str) or not evidence[field].strip() for field in required):
-        return False
-    if evidence.get("implementation_status") != "ready" or evidence.get("qa_status") != "passed":
-        return False
-    return state is LifecycleState.QA_PASSED or evidence.get("review_status") == "accepted"
+    implementation = evidence.get("implementation_evidence")
+    qa = evidence.get("qa_evidence")
+    reviewer = evidence.get("review_evidence")
+    if state is LifecycleState.IMPLEMENTATION_READY:
+        return _valid_role_evidence(implementation, "implementation", work_item)
+    if state is LifecycleState.QA_PASSED:
+        return _valid_role_evidence(qa, "qa", work_item)
+    if state is LifecycleState.REVIEW_ACCEPTED:
+        return _valid_role_evidence(recorded_qa, "qa", work_item) and _valid_role_evidence(reviewer, "reviewer", work_item)
+    if state is LifecycleState.HUMAN_MERGE_READY:
+        return (
+            _valid_role_evidence(implementation, "implementation", work_item)
+            and _valid_role_evidence(qa, "qa", work_item)
+            and _valid_role_evidence(reviewer, "reviewer", work_item)
+            and _valid_role_evidence(recorded_implementation, "implementation", work_item)
+            and _valid_role_evidence(recorded_qa, "qa", work_item)
+            and _valid_role_evidence(recorded_review, "reviewer", work_item)
+        )
+    return True
 
 
 class DeliveryState(str, Enum):
@@ -401,7 +439,6 @@ class LifecycleState(str, Enum):
     HUMAN_MERGE_READY = "HUMAN_MERGE_READY"
     ESCALATED = "ESCALATED"
     BLOCKED = "BLOCKED"
-    DELIVERY_UNKNOWN = "DELIVERY_UNKNOWN"
 
 
 class LifecycleTransitionError(ValueError):
@@ -469,6 +506,55 @@ class ArtifactBindingIntent:
     commit_sha: str
 
 
+@dataclass
+class ChildDeliveryOperation:
+    """One recipient wake-up in the unified operation UUID namespace.
+
+    The parent lifecycle intent applies its state exactly once.  These child
+    records state only transport to one exact recipient and can be observed,
+    reconciled, and retried without replaying the parent or a sibling.
+    """
+
+    operation_id: str
+    parent_operation_id: str
+    recipient_task_key: str
+    recipient_role: str
+    state: DeliveryState = DeliveryState.PENDING
+    attempt_count: int = 1
+    retry_allowed: bool = False
+    reconciliation_count: int = 0
+    last_reconciliation: Reconciliation | None = None
+    fallback: str | None = None
+
+    def unknown(self) -> None:
+        if self.state is DeliveryState.DELIVERED:
+            raise LifecycleTransitionError("delivered child delivery is terminal")
+        self.state = DeliveryState.DELIVERY_UNKNOWN
+        self.retry_allowed = False
+
+    def reconcile(self, result: Reconciliation) -> None:
+        if self.state is not DeliveryState.DELIVERY_UNKNOWN:
+            raise LifecycleTransitionError("only an exact unknown child delivery can be reconciled")
+        self.reconciliation_count += 1
+        self.last_reconciliation = result
+        if result is Reconciliation.APPLIED:
+            self.state = DeliveryState.DELIVERED
+            self.retry_allowed = False
+        elif result is Reconciliation.ABSENT:
+            self.state = DeliveryState.NOT_DELIVERED
+            self.retry_allowed = True
+        else:
+            self.state = DeliveryState.DELIVERY_UNKNOWN
+            self.retry_allowed = False
+
+    def retry(self) -> None:
+        if self.state is not DeliveryState.NOT_DELIVERED or not self.retry_allowed:
+            raise LifecycleTransitionError("child delivery is not retryable")
+        self.state = DeliveryState.PENDING
+        self.retry_allowed = False
+        self.attempt_count += 1
+
+
 class CoordinatorLifecycle:
     """Delivery-cell lifecycle with Coordinator supervision, not message relaying.
 
@@ -500,10 +586,13 @@ class CoordinatorLifecycle:
         self._artifact: tuple[str, str, str] | None = None
         self._artifact_revisions: list[tuple[str, str, str]] = []
         self._correction_checkpoint: int | None = None
-        self._operations: dict[str, LifecycleOperationIntent | ArtifactBindingIntent] = {}
+        self._operations: dict[str, LifecycleOperationIntent | ArtifactBindingIntent | ChildDeliveryOperation] = {}
         self._retryable_operations: set[str] = set()
         self._terminal_operations: set[str] = set()
-        self._unknown: str | None = None
+        self._unknown: set[str] = set()
+        self._implementation_evidence: dict[str, Any] | None = None
+        self._qa_evidence: dict[str, Any] | None = None
+        self._review_evidence: dict[str, Any] | None = None
 
     @staticmethod
     def _valid_operation(operation_id: str) -> bool:
@@ -538,7 +627,7 @@ class CoordinatorLifecycle:
             if prior == intent and operation_id in self._terminal_operations:
                 return
             raise LifecycleTransitionError("operation UUID is already bound to another immutable intent")
-        if self._unknown is not None:
+        if self._unknown:
             raise LifecycleTransitionError("cannot bind an artifact while delivery reconciliation is pending")
         if self.state in {LifecycleState.BLOCKED, LifecycleState.HUMAN_MERGE_READY}:
             raise LifecycleTransitionError("cannot bind an artifact after terminal lifecycle state")
@@ -576,7 +665,6 @@ class CoordinatorLifecycle:
             LifecycleState.HUMAN_MERGE_READY: "DELIVERY_CELL_COMPLETED",
             LifecycleState.BLOCKED: "BLOCKED",
             LifecycleState.ESCALATED: "ESCALATED",
-            LifecycleState.DELIVERY_UNKNOWN: "DELIVERY_UNKNOWN",
         }.get(next_state)
 
     def _build_transition_intent(
@@ -624,19 +712,16 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError("operation intent payload is not canonical")
         return decoded
 
-    def _validate_transition_intent(self, intent: LifecycleOperationIntent, *, reconciling: bool = False, require_prerequisites: bool = True) -> dict[str, Any] | None:
+    def _validate_transition_intent(self, intent: LifecycleOperationIntent, *, require_prerequisites: bool = True) -> dict[str, Any] | None:
         if not self._valid_operation(intent.operation_id) or type(intent.from_state) is not LifecycleState or type(intent.next_state) is not LifecycleState:
             raise LifecycleTransitionError("operation intent has an invalid lifecycle identity")
         if not all(isinstance(value, str) for value in (intent.source_task_key, intent.target_task_key, intent.event)):
             raise LifecycleTransitionError("operation intent has malformed lifecycle routing")
-        if intent.from_state in {LifecycleState.DELIVERY_UNKNOWN, LifecycleState.BLOCKED, LifecycleState.HUMAN_MERGE_READY}:
+        if intent.from_state in {LifecycleState.BLOCKED, LifecycleState.HUMAN_MERGE_READY}:
             raise LifecycleTransitionError("operation intent has an invalid source lifecycle state")
-        if reconciling:
-            if self.state is not LifecycleState.DELIVERY_UNKNOWN:
-                raise LifecycleTransitionError("reconciliation requires DELIVERY_UNKNOWN")
-        elif self.state is not intent.from_state:
+        if self.state is not intent.from_state:
             raise LifecycleTransitionError("operation intent no longer matches the current lifecycle state")
-        if intent.next_state not in self._TRANSITIONS.get(intent.from_state, set()) and intent.next_state not in {LifecycleState.BLOCKED, LifecycleState.ESCALATED, LifecycleState.DELIVERY_UNKNOWN}:
+        if intent.next_state not in self._TRANSITIONS.get(intent.from_state, set()) and intent.next_state not in {LifecycleState.BLOCKED, LifecycleState.ESCALATED}:
             raise LifecycleTransitionError("operation intent has an invalid lifecycle transition")
         if not self._direction(intent.from_state, intent.next_state, intent.source_task_key, intent.target_task_key, intent.event):
             raise LifecycleTransitionError("operation intent has an unauthorized lifecycle direction")
@@ -666,23 +751,53 @@ class CoordinatorLifecycle:
                 raise LifecycleTransitionError("correction checkpoint is missing, malformed, or not authoritative")
         elif require_prerequisites and intent.correction_checkpoint is not None:
             raise LifecycleTransitionError("non-correction operation intent has a checkpoint")
+        artifact_work_item = {**self.work_item.as_dict(), "pull_request_url": self._artifact[0] if self._artifact else None, "commit_sha": self._artifact[1] if self._artifact else None}
         if require_prerequisites and intent.next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._bound_ready_evidence(evidence):
             raise LifecycleTransitionError("operation intent requires canonical passed readiness evidence")
-        if require_prerequisites and intent.next_state in {LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY} and not _valid_delivery_evidence(evidence, {**self.work_item.as_dict(), "pull_request_url": self._artifact[0] if self._artifact else None, "commit_sha": self._artifact[1] if self._artifact else None}, intent.next_state):
+        if require_prerequisites and intent.next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY} and not _valid_delivery_evidence(
+            evidence,
+            artifact_work_item,
+            intent.next_state,
+            recorded_implementation=self._implementation_evidence,
+            recorded_qa=self._qa_evidence,
+            recorded_review=self._review_evidence,
+        ):
             raise LifecycleTransitionError("terminal delivery-cell operation requires exact typed QA and review evidence")
         if require_prerequisites and intent.next_state is LifecycleState.IMPLEMENTATION_READY and intent.from_state is LifecycleState.CORRECTION_ACTIVE and (self._correction_checkpoint is None or len(self._artifact_revisions) <= self._correction_checkpoint):
             raise LifecycleTransitionError("correction readiness requires a later artifact revision")
         return evidence
 
-    def _apply_transition_intent(self, intent: LifecycleOperationIntent, *, reconciling: bool = False) -> LifecycleState:
-        self._validate_transition_intent(intent, reconciling=reconciling)
+    def _apply_transition_intent(self, intent: LifecycleOperationIntent) -> LifecycleState:
+        evidence = self._validate_transition_intent(intent)
         if intent.next_state is LifecycleState.CORRECTION_ACTIVE:
             self._correction_checkpoint = intent.correction_checkpoint
+        if intent.next_state is LifecycleState.IMPLEMENTATION_READY:
+            self._implementation_evidence = evidence.get("implementation_evidence") if evidence else None
+        if intent.next_state is LifecycleState.QA_PASSED:
+            self._qa_evidence = evidence.get("qa_evidence") if evidence else None
+        if intent.next_state is LifecycleState.REVIEW_ACCEPTED:
+            self._review_evidence = evidence.get("review_evidence") if evidence else None
         self.state = intent.next_state
         self._retryable_operations.discard(intent.operation_id)
         if intent.next_state is LifecycleState.HUMAN_MERGE_READY:
             self._terminal_operations.add(intent.operation_id)
         return self.state
+
+    def _register_child_deliveries(self, intent: LifecycleOperationIntent) -> None:
+        """Atomically register every fan-out wake-up in the same UUID registry."""
+        children = tuple(zip(intent.recipient_task_keys, intent.recipient_operation_ids, strict=True))
+        if any(operation_id in self._operations for _, operation_id in children):
+            raise LifecycleTransitionError("recipient delivery UUID collides with an existing operation")
+        for recipient_key, operation_id in children:
+            role = self._role_for_task_key(recipient_key)
+            if role is None:
+                raise LifecycleTransitionError("recipient delivery requires a canonical logical task key")
+            self._operations[operation_id] = ChildDeliveryOperation(
+                operation_id=operation_id,
+                parent_operation_id=intent.operation_id,
+                recipient_task_key=recipient_key,
+                recipient_role=role,
+            )
 
     def transition(
         self,
@@ -724,52 +839,63 @@ class CoordinatorLifecycle:
             if operation_id in self._terminal_operations:
                 return self.state
             return self.state
+        if any(child_id in self._operations for child_id in intent.recipient_operation_ids):
+            raise LifecycleTransitionError("recipient delivery UUID collides with an existing operation")
         self._operations[operation_id] = intent
+        self._register_child_deliveries(intent)
         return self._apply_transition_intent(intent)
 
-    def observe_delivery_unknown(self, actor: str, operation_id: str, intended_state: LifecycleState, evidence: dict[str, Any] | None = None, *, source_task_key: str | None = None, target_task_key: str | None = None, event: str | None = None, fallback: dict[str, Any] | None = None, recipient_operation_ids: dict[str, str] | None = None) -> LifecycleState:
-        if not self._valid_operation(operation_id):
-            raise LifecycleTransitionError("lifecycle transitions require a UUID operation ID")
-        if operation_id in self._operations:
-            raise LifecycleTransitionError("operation ID cannot be overwritten while delivery is unknown")
-        if intended_state in {LifecycleState.BLOCKED, LifecycleState.ESCALATED}:
-            fallback = canonicalize_and_validate_fallback(fallback, operation_id, self.work_item)
-            if fallback is None or fallback["repository"] != self.work_item.repository:
-                raise LifecycleTransitionError("BLOCKED unknown delivery requires the canonical work-item fallback")
-        default_event = self._event_for(intended_state)
-        if (source_task_key is None) != (target_task_key is None):
-            raise LifecycleTransitionError("source and target logical task keys must be supplied together")
-        tuple_ = lifecycle_tuple(self.issue_number, self.state, intended_state, event or default_event)
-        source_task_key = source_task_key or (tuple_[2] if tuple_ else self.coordinator_key)
-        target_task_key = target_task_key or (tuple_[3] if tuple_ else self.coordinator_key)
-        event = event or self._event_for(intended_state)
-        if event is None:
-            raise LifecycleTransitionError("lifecycle event is required")
-        self._require_peer_actor(actor, source_task_key)
-        intent = self._build_transition_intent(operation_id, intended_state, source_task_key, target_task_key, event, evidence, fallback, recipient_operation_ids)
-        self._validate_transition_intent(intent, require_prerequisites=False)
-        self._operations[operation_id] = intent
-        self._unknown = operation_id
-        self.state = LifecycleState.DELIVERY_UNKNOWN
+    def observe_delivery_unknown(self, actor: str, operation_id: str, intended_state: LifecycleState | None = None, evidence: dict[str, Any] | None = None, *, target_task_key: str | None = None, fallback: dict[str, Any] | None = None, **_ignored: Any) -> LifecycleState:
+        """Mark one existing recipient wake-up uncertain without changing lifecycle state.
+
+        `intended_state` and `evidence` are accepted only for an explicit
+        backwards-compatible call shape and are never used to create a generic
+        lifecycle uncertainty transition.  The child record is the exact
+        transport authority; GitHub evidence remains the durable fallback.
+        """
+        child = self._operations.get(operation_id)
+        if not isinstance(child, ChildDeliveryOperation):
+            raise LifecycleTransitionError("DELIVERY_UNKNOWN requires an existing exact recipient delivery UUID")
+        parent = self._operations.get(child.parent_operation_id)
+        if not isinstance(parent, LifecycleOperationIntent):
+            raise LifecycleTransitionError("recipient delivery has no authoritative parent lifecycle operation")
+        if actor != self._role_for_task_key(parent.source_task_key):
+            raise LifecycleTransitionError("only the parent sender may report its recipient delivery unknown")
+        if target_task_key is None or target_task_key != child.recipient_task_key:
+            raise LifecycleTransitionError("delivery unknown requires its exact recipient logical task key")
+        if intended_state is not None and intended_state is not parent.next_state:
+            raise LifecycleTransitionError("delivery unknown cannot retarget its parent lifecycle event")
+        canonical_fallback = canonicalize_and_validate_fallback(fallback, operation_id, self.work_item) if fallback is not None else None
+        if fallback is not None and canonical_fallback is None:
+            raise LifecycleTransitionError("delivery unknown fallback is malformed")
+        if child.recipient_role == "coordinator" and canonical_fallback is None:
+            raise LifecycleTransitionError("delivery unknown to Coordinator requires a copy-paste fallback")
+        child.unknown()
+        child.fallback = json.dumps(canonical_fallback, sort_keys=True, separators=(",", ":")) if canonical_fallback else None
+        self._unknown.add(operation_id)
         return self.state
 
-    def reconcile_delivery(self, actor: str, operation_id: str, applied: bool) -> LifecycleState:
+    def retry_delivery(self, actor: str, operation_id: str) -> DeliveryState:
+        child = self._operations.get(operation_id)
+        if not isinstance(child, ChildDeliveryOperation):
+            raise LifecycleTransitionError("retry requires an exact child delivery UUID")
+        parent = self._operations.get(child.parent_operation_id)
+        if not isinstance(parent, LifecycleOperationIntent) or actor != self._role_for_task_key(parent.source_task_key):
+            raise LifecycleTransitionError("only the parent sender may retry a recipient delivery")
+        child.retry()
+        return child.state
+
+    def reconcile_delivery(self, actor: str, operation_id: str, applied: bool | Reconciliation) -> LifecycleState:
+        """Reconcile one exact child wake-up; never replay its parent transition."""
         if actor != "coordinator":
             raise LifecycleTransitionError("Coordinator supervises delivery reconciliation")
-        if self._unknown is None or self._unknown != operation_id:
-            raise LifecycleTransitionError("exact DELIVERY_UNKNOWN operation must be reconciled")
-        intent = self._operations.get(operation_id)
-        if not isinstance(intent, LifecycleOperationIntent):
-            raise LifecycleTransitionError("reconciliation requires a lifecycle operation intent")
-        if intent.operation_id != operation_id or intent.operation_id != self._unknown:
-            raise LifecycleTransitionError("reconciliation intent UUID does not match the unresolved operation")
-        self._validate_transition_intent(intent, reconciling=True)
-        if applied:
-            self._apply_transition_intent(intent, reconciling=True)
-        else:
-            self.state = intent.from_state
-            self._retryable_operations.add(operation_id)
-        self._unknown = None
+        child = self._operations.get(operation_id)
+        if not isinstance(child, ChildDeliveryOperation) or operation_id not in self._unknown:
+            raise LifecycleTransitionError("exact unknown recipient delivery must be reconciled")
+        result = applied if isinstance(applied, Reconciliation) else (Reconciliation.APPLIED if applied else Reconciliation.ABSENT)
+        child.reconcile(result)
+        if result is not Reconciliation.UNAVAILABLE:
+            self._unknown.discard(operation_id)
         return self.state
 
 
@@ -944,6 +1070,8 @@ def _validate_schema(
             errors.append(f"{path} must match exactly one schema alternative")
 
     if isinstance(value, list):
+        if "minItems" in schema and len(value) < schema["minItems"]:
+            errors.append(f"{path} must contain at least {schema['minItems']} item(s)")
         if schema.get("uniqueItems"):
             encoded = [json.dumps(item, sort_keys=True, separators=(",", ":")) for item in value]
             if len(encoded) != len(set(encoded)):

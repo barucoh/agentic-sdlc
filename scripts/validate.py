@@ -138,7 +138,7 @@ legacy_name = "scr" + "ibe"
 for relative in subprocess.run(["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.splitlines():
     path = ROOT / relative
     try:
-        if re.search(r"\b" + legacy_name + r"\b", path.read_text(encoding="utf-8"), re.IGNORECASE):
+        if legacy_name.lower() in path.read_text(encoding="utf-8").lower():
             errors.append(f"legacy role name occurs in {relative}")
     except UnicodeDecodeError:
         continue

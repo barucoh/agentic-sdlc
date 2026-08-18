@@ -157,10 +157,11 @@ class HandoffAndCoordinationTests(unittest.TestCase):
 
     def peer_transition(self, lifecycle: CoordinatorLifecycle, next_state: LifecycleState, operation_id: str, evidence: dict | None = None, **kwargs: object) -> LifecycleState:
         """Drive the protocol as the peer that owns the authoritative source key."""
-        if next_state in {LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY}:
+        if next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY}:
             if evidence is None:
                 evidence = {"commit_sha": lifecycle._artifact[1], "pull_request_url": lifecycle._artifact[0], "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
-            evidence = {**evidence, "implementation_status": "ready", "qa_status": "passed", "review_status": "accepted", "implementation_evidence": "https://github.com/o/r/pull/6", "qa_evidence": "https://github.com/o/r/pull/6", "review_evidence": "https://github.com/o/r/pull/6"}
+            role_evidence = lambda role: {"role": role, "commit_sha": evidence["commit_sha"], "pull_request_url": evidence["pull_request_url"], "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
+            evidence = {**evidence, "implementation_evidence": role_evidence("implementation"), "qa_evidence": role_evidence("qa"), "review_evidence": role_evidence("reviewer")}
         event = kwargs.get("event") or lifecycle._event_for(next_state)
         source = kwargs.get("source_task_key")
         target = kwargs.get("target_task_key")
@@ -177,6 +178,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         return lifecycle.transition(actor, next_state, operation_id, evidence, **kwargs)
 
     def peer_unknown(self, lifecycle: CoordinatorLifecycle, operation_id: str, intended_state: LifecycleState, evidence: dict | None = None, **kwargs: object) -> LifecycleState:
+        """Apply the parent event once, then mark its first exact child uncertain."""
         event = kwargs.get("event") or lifecycle._event_for(intended_state)
         source = kwargs.get("source_task_key")
         target = kwargs.get("target_task_key")
@@ -187,10 +189,13 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             kwargs["source_task_key"] = source
             kwargs["target_task_key"] = target
         route = next(item for item in lifecycle_routes(lifecycle.issue_number, lifecycle.state, intended_state, event) if item[2] == source and target in item[3])
-        kwargs.setdefault("recipient_operation_ids", {key: str(uuid4()) for key in route[3]})
+        recipients = kwargs.setdefault("recipient_operation_ids", {key: str(uuid4()) for key in route[3]})
         self.assertIsInstance(source, str)
         actor = source.rsplit("-", 1)[1]
-        return lifecycle.observe_delivery_unknown(actor, operation_id, intended_state, evidence, **kwargs)
+        result = self.peer_transition(lifecycle, intended_state, operation_id, evidence, **kwargs)
+        self.assertIsInstance(recipients, dict)
+        lifecycle.observe_delivery_unknown(actor, recipients[route[3][0]], intended_state, target_task_key=route[3][0])
+        return result
 
     def handoff(self) -> dict:
         return json.loads(
@@ -231,8 +236,9 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             lifecycle.transition("implementation", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-reviewer")
         op = str(uuid4())
         lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
-        lifecycle.observe_delivery_unknown("implementation", op, LifecycleState.IMPLEMENTATION_READY, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-qa")
-        self.assertEqual(lifecycle.reconcile_delivery("coordinator", op, True), LifecycleState.IMPLEMENTATION_READY)
+        self.peer_unknown(lifecycle, op, LifecycleState.IMPLEMENTATION_READY, evidence)
+        child_id = lifecycle._operations[op].recipient_operation_ids[0]
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", child_id, True), LifecycleState.IMPLEMENTATION_READY)
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("implementation", LifecycleState.IMPLEMENTATION_READY, op, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-qa")
         with self.assertRaises(LifecycleTransitionError):
@@ -255,8 +261,9 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         evidence = {"commit_sha": "a" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
         lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
         operation_id = str(uuid4())
-        lifecycle.observe_delivery_unknown("implementation", operation_id, LifecycleState.IMPLEMENTATION_READY, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-qa")
-        self.assertEqual(lifecycle.reconcile_delivery("coordinator", operation_id, False), LifecycleState.IMPLEMENTATION_ACTIVE)
+        self.peer_unknown(lifecycle, operation_id, LifecycleState.IMPLEMENTATION_READY, evidence)
+        child_id = lifecycle._operations[operation_id].recipient_operation_ids[0]
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", child_id, False), LifecycleState.IMPLEMENTATION_READY)
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("implementation", LifecycleState.IMPLEMENTATION_READY, operation_id, None, source_task_key="issue-5-implementation", target_task_key="issue-5-qa")
 
@@ -367,8 +374,11 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         evidence = {"commit_sha": "a" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
         lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
         operation_id = str(uuid4())
-        self.assertEqual(self.peer_unknown(lifecycle, operation_id, LifecycleState.IMPLEMENTATION_READY, evidence), LifecycleState.DELIVERY_UNKNOWN)
-        self.assertEqual(lifecycle.reconcile_delivery("coordinator", operation_id, True), LifecycleState.IMPLEMENTATION_READY)
+        self.assertEqual(self.peer_unknown(lifecycle, operation_id, LifecycleState.IMPLEMENTATION_READY, evidence), LifecycleState.IMPLEMENTATION_READY)
+        parent = lifecycle._operations[operation_id]
+        child_id = parent.recipient_operation_ids[0]
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", child_id, True), LifecycleState.IMPLEMENTATION_READY)
+        self.assertEqual(lifecycle._operations[child_id].state, DeliveryState.DELIVERED)
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("implementation", LifecycleState.IMPLEMENTATION_READY, operation_id, evidence)
 
@@ -378,8 +388,14 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
         operation_id = str(uuid4())
         recipients = {"issue-5-qa": str(uuid4()), "issue-5-reviewer": str(uuid4())}
-        lifecycle.transition("implementation", LifecycleState.IMPLEMENTATION_READY, operation_id, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-qa", recipient_operation_ids=recipients)
+        self.peer_transition(lifecycle, LifecycleState.IMPLEMENTATION_READY, operation_id, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-qa", recipient_operation_ids=recipients)
         self.assertEqual(lifecycle._operations[operation_id].recipient_task_keys, ("issue-5-qa", "issue-5-reviewer"))
+        self.assertEqual(lifecycle._operations[recipients["issue-5-qa"]].parent_operation_id, operation_id)
+        lifecycle.observe_delivery_unknown("implementation", recipients["issue-5-reviewer"], LifecycleState.IMPLEMENTATION_READY, target_task_key="issue-5-reviewer")
+        self.assertEqual(lifecycle._operations[recipients["issue-5-qa"]].state, DeliveryState.PENDING)
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", recipients["issue-5-reviewer"], False), LifecycleState.IMPLEMENTATION_READY)
+        self.assertEqual(lifecycle._operations[recipients["issue-5-reviewer"]].state, DeliveryState.NOT_DELIVERED)
+        self.assertEqual(lifecycle.retry_delivery("implementation", recipients["issue-5-reviewer"]), DeliveryState.PENDING)
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("qa", LifecycleState.QA_PASSED, str(uuid4()), evidence, source_task_key="issue-5-qa", target_task_key="issue-5-reviewer", recipient_operation_ids={"issue-5-reviewer": str(uuid4()), "issue-5-implementation": str(uuid4())})
 
@@ -389,7 +405,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         for relative in subprocess.run(["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.splitlines():
             path = ROOT / relative
             try:
-                if re.search(r"\b" + legacy_name + r"\b", path.read_text(encoding="utf-8"), re.IGNORECASE):
+                if legacy_name.lower() in path.read_text(encoding="utf-8").lower():
                     matches.append(path)
             except UnicodeDecodeError:
                 pass
@@ -400,40 +416,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertIn("stateDiagram-v2", coordination)
         self.assertIn("DELIVERY_CELL_COMPLETED", coordination)
 
-    def test_applied_correction_rejects_coordinated_checkpoint_intent_tampering(self) -> None:
-        lifecycle = self.lifecycle()
-        evidence = {
-            "commit_sha": "a" * 40,
-            "pull_request_url": "https://github.com/o/r/pull/6",
-            "local_gates": "passed",
-            "ci_status": "passed",
-            "required_checks": [{"name": "validate", "status": "passed"}],
-        }
-        lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
-        for state in (LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED):
-            self.peer_transition(lifecycle, state, str(uuid4()), evidence if state is not LifecycleState.CHANGES_REQUESTED else None)
-
-        operation_id = str(uuid4())
-        self.assertEqual(
-            self.peer_unknown(lifecycle, operation_id, LifecycleState.CORRECTION_ACTIVE),
-            LifecycleState.DELIVERY_UNKNOWN,
-        )
-        record = lifecycle._operations[operation_id]
-        self.assertEqual(record.correction_checkpoint, 1)
-        object.__setattr__(record, "correction_checkpoint", 0)
-        record_before = copy.deepcopy(record)
-        artifacts_before = list(lifecycle._artifact_revisions)
-
-        with self.assertRaisesRegex(LifecycleTransitionError, "not authoritative"):
-            lifecycle.reconcile_delivery("coordinator", operation_id, True)
-        self.assertEqual(lifecycle.state, LifecycleState.DELIVERY_UNKNOWN)
-        self.assertIsNone(lifecycle._correction_checkpoint)
-        self.assertEqual(lifecycle._artifact_revisions, artifacts_before)
-        self.assertEqual(lifecycle._operations[operation_id], record_before)
-
-        self.assertEqual(lifecycle.state, LifecycleState.DELIVERY_UNKNOWN)
-
-    def test_correction_checkpoint_is_semantic_not_mutable_authority_state(self) -> None:
+    def test_delivery_unknown_is_child_overlay_and_cannot_retarget_lifecycle(self) -> None:
         evidence = {
             "commit_sha": "a" * 40,
             "pull_request_url": "https://github.com/o/r/pull/6",
@@ -449,148 +432,17 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 self.peer_transition(lifecycle, state, str(uuid4()), evidence if state is not LifecycleState.CHANGES_REQUESTED else None)
             operation_id = str(uuid4())
             self.peer_unknown(lifecycle, operation_id, LifecycleState.CORRECTION_ACTIVE)
-            return lifecycle, operation_id
+            parent = lifecycle._operations[operation_id]
+            return lifecycle, parent.recipient_operation_ids[0]
 
-        for name, replacement in {
-            "zero": 0,
-            "boolean": True,
-            "missing": None,
-            "string": "1",
-            "negative": -1,
-            "oversized": 2,
-        }.items():
-            with self.subTest(checkpoint=name):
-                lifecycle, operation_id = unknown_correction()
-                record = lifecycle._operations[operation_id]
-                object.__setattr__(record, "correction_checkpoint", replacement)
-                lifecycle._correction_authority = {operation_id: replacement}
-                record_before = copy.deepcopy(record)
-                artifacts_before = list(lifecycle._artifact_revisions)
-
-                with self.assertRaises(LifecycleTransitionError):
-                    lifecycle.reconcile_delivery("coordinator", operation_id, True)
-                self.assertEqual(lifecycle.state, LifecycleState.DELIVERY_UNKNOWN)
-                self.assertEqual(lifecycle._unknown, operation_id)
-                self.assertIsNone(lifecycle._correction_checkpoint)
-                self.assertEqual(lifecycle._artifact_revisions, artifacts_before)
-                self.assertEqual(lifecycle._operations[operation_id], record_before)
-
-        lifecycle, operation_id = unknown_correction()
-        record = lifecycle._operations[operation_id]
-        object.__setattr__(record, "correction_checkpoint", 0)
-        lifecycle._correction_authority = {operation_id: 0}
+        lifecycle, child_id = unknown_correction()
+        state_before = lifecycle.state
         with self.assertRaises(LifecycleTransitionError):
-            lifecycle.reconcile_delivery("coordinator", operation_id, True)
-        self.assertEqual(lifecycle.state, LifecycleState.DELIVERY_UNKNOWN)
-
-    def test_reconciliation_revalidates_the_entire_frozen_operation_intent(self) -> None:
-        evidence = {
-            "commit_sha": "a" * 40,
-            "pull_request_url": "https://github.com/o/r/pull/6",
-            "local_gates": "passed",
-            "ci_status": "passed",
-            "required_checks": [{"name": "validate", "status": "passed"}],
-        }
-
-        def unknown_correction() -> tuple[CoordinatorLifecycle, str]:
-            lifecycle = self.lifecycle()
-            lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
-            for state in (LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED):
-                self.peer_transition(lifecycle, state, str(uuid4()), evidence if state is not LifecycleState.CHANGES_REQUESTED else None)
-            operation_id = str(uuid4())
-            self.peer_unknown(lifecycle, operation_id, LifecycleState.CORRECTION_ACTIVE)
-            return lifecycle, operation_id
-
-        def retarget_blocked(lifecycle: CoordinatorLifecycle, intent: object, fallback: str | None) -> None:
-            object.__setattr__(intent, "next_state", LifecycleState.BLOCKED)
-            object.__setattr__(intent, "event", "BLOCKED")
-            object.__setattr__(intent, "source_task_key", lifecycle.coordinator_key)
-            object.__setattr__(intent, "target_task_key", lifecycle.coordinator_key)
-            object.__setattr__(intent, "correction_checkpoint", None)
-            object.__setattr__(intent, "fallback", fallback)
-
-        for name, mutation in {
-            "serialized-next-only": lambda lifecycle, intent: object.__setattr__(intent, "next_state", LifecycleState.BLOCKED),
-            "coordinated-blocked-without-fallback": lambda lifecycle, intent: retarget_blocked(lifecycle, intent, None),
-            "coordinated-blocked-with-forged-fallback": lambda lifecycle, intent: retarget_blocked(
-                lifecycle,
-                intent,
-                json.dumps(
-                    {
-                        "repository": "o/r",
-                        "issue_or_pr_url": "https://github.com/o/r/issues/999",
-                        "operation_id": intent.operation_id,
-                        "objective": "Recover",
-                        "expected_output": "Handoff",
-                        "evidence": "PR evidence",
-                        "next_owner": "coordinator",
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-            ),
-        }.items():
-            with self.subTest(mutation=name):
-                lifecycle, operation_id = unknown_correction()
-                intent = lifecycle._operations[operation_id]
-                mutation(lifecycle, intent)
-                intent_before = copy.deepcopy(intent)
-                artifacts_before = list(lifecycle._artifact_revisions)
-                with self.assertRaises(LifecycleTransitionError):
-                    lifecycle.reconcile_delivery("coordinator", operation_id, True)
-                self.assertEqual(lifecycle.state, LifecycleState.DELIVERY_UNKNOWN)
-                self.assertEqual(lifecycle._unknown, operation_id)
-                self.assertNotIn(operation_id, lifecycle._retryable_operations)
-                self.assertEqual(lifecycle._operations[operation_id], intent_before)
-                self.assertEqual(lifecycle._artifact_revisions, artifacts_before)
-
-        lifecycle, operation_id = unknown_correction()
-        intent = lifecycle._operations[operation_id]
-        object.__setattr__(intent, "correction_checkpoint", 0)
-        intent_before = copy.deepcopy(intent)
-        with self.assertRaises(LifecycleTransitionError):
-            lifecycle.reconcile_delivery("coordinator", operation_id, False)
-        self.assertEqual(lifecycle.state, LifecycleState.DELIVERY_UNKNOWN)
-        self.assertEqual(lifecycle._unknown, operation_id)
-        self.assertNotIn(operation_id, lifecycle._retryable_operations)
-        self.assertEqual(lifecycle._operations[operation_id], intent_before)
-
-    def test_reconciliation_binds_intent_uuid_to_unknown_operation_and_registry(self) -> None:
-        evidence = {
-            "commit_sha": "a" * 40,
-            "pull_request_url": "https://github.com/o/r/pull/6",
-            "local_gates": "passed",
-            "ci_status": "passed",
-            "required_checks": [{"name": "validate", "status": "passed"}],
-        }
-
-        def unknown_correction() -> tuple[CoordinatorLifecycle, str, str]:
-            lifecycle = self.lifecycle()
-            binding_id = str(uuid4())
-            lifecycle.bind_delivery_artifact(binding_id, evidence["pull_request_url"], evidence["commit_sha"])
-            for state in (LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED):
-                self.peer_transition(lifecycle, state, str(uuid4()), evidence if state is not LifecycleState.CHANGES_REQUESTED else None)
-            operation_id = str(uuid4())
-            self.peer_unknown(lifecycle, operation_id, LifecycleState.CORRECTION_ACTIVE)
-            return lifecycle, binding_id, operation_id
-
-        for mode in (True, False):
-            for replacement in ("malformed-operation", str(uuid4())):
-                with self.subTest(applied=mode, replacement=replacement):
-                    lifecycle, binding_id, operation_id = unknown_correction()
-                    intent = lifecycle._operations[operation_id]
-                    object.__setattr__(intent, "operation_id", replacement)
-                    intent_after = copy.deepcopy(intent)
-                    binding_before = lifecycle._operations[binding_id]
-                    artifacts_before = list(lifecycle._artifact_revisions)
-                    with self.assertRaises(LifecycleTransitionError):
-                        lifecycle.reconcile_delivery("coordinator", operation_id, mode)
-                    self.assertEqual(lifecycle.state, LifecycleState.DELIVERY_UNKNOWN)
-                    self.assertEqual(lifecycle._unknown, operation_id)
-                    self.assertNotIn(operation_id, lifecycle._retryable_operations)
-                    self.assertEqual(lifecycle._operations[operation_id], intent_after)
-                    self.assertEqual(lifecycle._operations[binding_id], binding_before)
-                    self.assertEqual(lifecycle._artifact_revisions, artifacts_before)
+            lifecycle.observe_delivery_unknown("reviewer", child_id, LifecycleState.BLOCKED)
+        self.assertEqual(lifecycle.state, state_before)
+        self.assertIn(child_id, lifecycle._unknown)
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", child_id, Reconciliation.UNAVAILABLE), state_before)
+        self.assertIn(child_id, lifecycle._unknown)
 
     def test_lifecycle_duplicate_operations_and_unknown_delivery_cannot_blind_activate(self) -> None:
         lifecycle = self.lifecycle()
@@ -610,11 +462,12 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.peer_transition(lifecycle, LifecycleState.IMPLEMENTATION_READY, str(uuid4()), evidence)
         self.peer_transition(lifecycle, LifecycleState.QA_PASSED, str(uuid4()), evidence)
         unknown_id = str(uuid4())
-        self.assertEqual(self.peer_unknown(lifecycle, unknown_id, LifecycleState.REVIEW_ACTIVE, evidence), LifecycleState.DELIVERY_UNKNOWN)
+        self.assertEqual(self.peer_unknown(lifecycle, unknown_id, LifecycleState.REVIEW_ACTIVE, evidence), LifecycleState.REVIEW_ACTIVE)
+        child_id = lifecycle._operations[unknown_id].recipient_operation_ids[0]
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("qa", LifecycleState.REVIEW_ACTIVE, str(uuid4()), evidence)
-        self.assertEqual(lifecycle.reconcile_delivery("coordinator", unknown_id, False), LifecycleState.QA_PASSED)
-        self.assertEqual(self.peer_transition(lifecycle, LifecycleState.REVIEW_ACTIVE, str(uuid4()), evidence), LifecycleState.REVIEW_ACTIVE)
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", child_id, False), LifecycleState.REVIEW_ACTIVE)
+        self.assertEqual(lifecycle.retry_delivery("qa", child_id), DeliveryState.PENDING)
 
     def test_lifecycle_can_block_when_host_task_control_is_unavailable(self) -> None:
         lifecycle = self.lifecycle()
@@ -639,7 +492,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 "effort": "Medium",
                 "sandbox_mode": "read-only",
                 "evidence": ["local gates passed", "CI passed"],
-                "readiness_evidence": {"commit_sha": "c" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]},
+                "readiness_evidence": {"commit_sha": "c" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}], "implementation_evidence": {"role": "implementation", "commit_sha": "c" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}},
                 "work_item": {
                     **ready["work_item"],
                     "repository": "o/r",
@@ -672,7 +525,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                     "pull_request_url": "https://github.com/o/r/pull/6",
                     "commit_sha": "d" * 40,
                 },
-                "readiness_evidence": {"commit_sha": "d" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]},
+                "readiness_evidence": {"commit_sha": "d" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}], "implementation_evidence": {"role": "implementation", "commit_sha": "d" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}},
             }
         )
         reviewer["recipient_task_keys"] = ["issue-1-reviewer"]
@@ -712,6 +565,72 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 mutated = mutate(value)
                 candidate = mutated if name == "root type" else value
                 self.assertTrue(validate_handoff(candidate), f"mutation accepted: {name}")
+
+    def test_child_delivery_uuid_registry_and_sibling_reconciliation_are_isolated(self) -> None:
+        lifecycle = self.lifecycle()
+        evidence = {"commit_sha": "f" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
+        artifact_id = str(uuid4())
+        lifecycle.bind_delivery_artifact(artifact_id, evidence["pull_request_url"], evidence["commit_sha"])
+        parent_id = str(uuid4())
+        qa_child, reviewer_child = str(uuid4()), str(uuid4())
+        self.peer_transition(
+            lifecycle,
+            LifecycleState.IMPLEMENTATION_READY,
+            parent_id,
+            evidence,
+            recipient_operation_ids={"issue-5-qa": qa_child, "issue-5-reviewer": reviewer_child},
+        )
+        self.assertEqual(lifecycle._operations[qa_child].parent_operation_id, parent_id)
+        self.assertEqual(lifecycle._operations[reviewer_child].recipient_task_key, "issue-5-reviewer")
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.observe_delivery_unknown("implementation", reviewer_child)
+        lifecycle.observe_delivery_unknown("implementation", reviewer_child, target_task_key="issue-5-reviewer")
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", reviewer_child, Reconciliation.ABSENT), LifecycleState.IMPLEMENTATION_READY)
+        self.assertEqual(lifecycle._operations[qa_child].state, DeliveryState.PENDING)
+        self.assertEqual(lifecycle.retry_delivery("implementation", reviewer_child), DeliveryState.PENDING)
+        lifecycle.observe_delivery_unknown("implementation", reviewer_child, target_task_key="issue-5-reviewer")
+        self.assertEqual(lifecycle.reconcile_delivery("coordinator", reviewer_child, Reconciliation.APPLIED), LifecycleState.IMPLEMENTATION_READY)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.observe_delivery_unknown("implementation", reviewer_child)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("qa", LifecycleState.QA_PASSED, artifact_id, evidence)
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("qa", LifecycleState.QA_PASSED, str(uuid4()), evidence, recipient_operation_ids={"issue-5-reviewer": qa_child, "issue-5-implementation": str(uuid4())})
+
+    def test_structured_evidence_requires_current_role_bound_artifact_without_side_effects(self) -> None:
+        lifecycle = self.lifecycle()
+        base = {"commit_sha": "c" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
+        lifecycle.bind_delivery_artifact(str(uuid4()), base["pull_request_url"], base["commit_sha"])
+        bad = {**base, "implementation_evidence": {"role": "implementation", **base, "commit_sha": "d" * 40}}
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("implementation", LifecycleState.IMPLEMENTATION_READY, str(uuid4()), bad, source_task_key="issue-5-implementation", target_task_key="issue-5-qa", recipient_operation_ids={"issue-5-qa": str(uuid4()), "issue-5-reviewer": str(uuid4())})
+        self.assertEqual(lifecycle.state, LifecycleState.IMPLEMENTATION_ACTIVE)
+        self.peer_transition(lifecycle, LifecycleState.IMPLEMENTATION_READY, str(uuid4()), base)
+        malformed = {**base, "qa_evidence": {"role": "qa", **base, "required_checks": []}}
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("qa", LifecycleState.QA_PASSED, str(uuid4()), malformed, source_task_key="issue-5-qa", target_task_key="issue-5-reviewer", recipient_operation_ids={"issue-5-reviewer": str(uuid4()), "issue-5-implementation": str(uuid4())})
+        self.assertEqual(lifecycle.state, LifecycleState.IMPLEMENTATION_READY)
+        review_only = {**base, "review_evidence": {"role": "reviewer", **base}}
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("reviewer", LifecycleState.REVIEW_ACCEPTED, str(uuid4()), review_only, source_task_key="issue-5-reviewer", target_task_key="issue-5-reviewer", recipient_operation_ids={"issue-5-reviewer": str(uuid4())})
+        self.assertEqual(lifecycle.state, LifecycleState.IMPLEMENTATION_READY)
+
+    def test_terminal_cell_evidence_requires_matching_recorded_qa_and_reviewer_proof(self) -> None:
+        lifecycle = self.lifecycle()
+        base = {"commit_sha": "e" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
+        lifecycle.bind_delivery_artifact(str(uuid4()), base["pull_request_url"], base["commit_sha"])
+        self.peer_transition(lifecycle, LifecycleState.IMPLEMENTATION_READY, str(uuid4()), base)
+        self.peer_transition(lifecycle, LifecycleState.QA_PASSED, str(uuid4()), base)
+        self.peer_transition(lifecycle, LifecycleState.REVIEW_ACTIVE, str(uuid4()), base)
+        stale = {**base, "review_evidence": {"role": "reviewer", **base, "commit_sha": "f" * 40}}
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("reviewer", LifecycleState.REVIEW_ACCEPTED, str(uuid4()), stale, source_task_key="issue-5-reviewer", target_task_key="issue-5-reviewer", recipient_operation_ids={"issue-5-reviewer": str(uuid4())})
+        self.assertEqual(lifecycle.state, LifecycleState.REVIEW_ACTIVE)
+        self.peer_transition(lifecycle, LifecycleState.REVIEW_ACCEPTED, str(uuid4()), base)
+        terminal_missing = {**base, "implementation_evidence": {"role": "implementation", **base}}
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("reviewer", LifecycleState.HUMAN_MERGE_READY, str(uuid4()), terminal_missing, source_task_key="issue-5-reviewer", target_task_key="issue-5-coordinator", recipient_operation_ids={"issue-5-coordinator": str(uuid4())})
+        self.assertEqual(lifecycle.state, LifecycleState.REVIEW_ACCEPTED)
 
     def operation(self, target: str = "task-a") -> TargetOperation:
         return TargetOperation(str(uuid4()), target, "https://github.com/o/r/issues/1", "Apply finding F-1")
@@ -855,6 +774,18 @@ class RepositoryStateTests(unittest.TestCase):
         self.assertNotIn("{project_name} #{issue_number}", config)
         again, _, _ = manage_repository.plan(target, "Legacy Fixture")
         self.assertFalse([a for a in again if a.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
+
+    def test_windows_crlf_noop_apply_preserves_managed_manifest_bytes(self) -> None:
+        target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
+        manifest = target / ".agentic-sdlc/managed.json"
+        crlf = manifest.read_bytes().replace(b"\n", b"\r\n")
+        manifest.write_bytes(crlf)
+        actions, writes, obsolete = manage_repository.plan(target, "Customized Fixture")
+        self.assertFalse([a for a in actions if a.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
+        manage_repository.apply(target, writes, obsolete, "Customized Fixture")
+        self.assertEqual(manifest.read_bytes(), crlf)
+        check, _, _ = manage_repository.plan(target, "Customized Fixture")
+        self.assertFalse([a for a in check if a.classification != "unchanged" and a.path == manage_repository.MANIFEST_PATH])
 
     def test_custom_content_and_project_codex_config_are_preserved(self) -> None:
         target = self.copy_fixture("customized_repository")

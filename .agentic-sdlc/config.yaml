@@ -24,7 +24,7 @@ routing_matrix:
   ephemeral_research: "gpt-5.6-luna/Low|gpt-5.6-terra/Low|gpt-5.6-sol/exceptional-rationale"
 lifecycle_policy: delivery-cell-v1
 lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"
-lifecycle_transport_states: BLOCKED, DELIVERY_UNKNOWN
+lifecycle_transport_overlay: per-recipient DELIVERY_UNKNOWN
 bootstrap_exception: false
 handoff_schema_version: 1.0.0
 handoff_schema_path: .agentic-sdlc/handoff.schema.json

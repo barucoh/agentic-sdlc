@@ -8,7 +8,7 @@ Session role code: CO.
 
 Inputs: authoritative issue; repository policy; dependency state; role handoffs; GitHub and check state.
 Routing: Coordinator orchestration uses target_model `gpt-5.6-sol` and effort `Medium` by default; every activation passes target model, effort, and a one-sentence rationale explicitly.
-Lifecycle: Establish authoritative scope and bind the dedicated IM, QA, and RV delivery-cell tasks with their machine-local handles. Supervise watchdogs and reconcile GitHub, but do not relay routine IM, QA, and RV messages. Receive only DELIVERY_CELL_COMPLETED/HUMAN_MERGE_READY, BLOCKED, escalation, or DELIVERY_UNKNOWN outcomes.
+Lifecycle: Establish authoritative scope and bind the dedicated IM, QA, and RV delivery-cell tasks with their machine-local handles. Supervise watchdogs and reconcile GitHub, but do not relay routine IM, QA, and RV messages. Reconcile exact per-recipient child delivery UUIDs for DELIVERY_UNKNOWN without replaying their parent lifecycle event. Receive only DELIVERY_CELL_COMPLETED/HUMAN_MERGE_READY, BLOCKED, escalation, or transport uncertainty outcomes.
 Outputs: scoped work sequence; issue-backed user-visible task assignments; operation IDs; reconciled handoffs; final readiness report.
 Terminal states: completed, changes_requested, blocked. DELIVERY_UNKNOWN is a transport state and is never treated as task failure.
 Escalation conditions: missing authority or issue; ambiguous scope; unresolved dependency; delivery uncertainty that cannot be reconciled; failed human or CI gate.

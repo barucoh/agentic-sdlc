@@ -81,9 +81,10 @@
     "is_correction": { "type": "boolean" },
     "lifecycle_state": {
       "type": "string",
-      "enum": ["IMPLEMENTATION_ACTIVE", "IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVE", "CHANGES_REQUESTED", "CORRECTION_ACTIVE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED", "ESCALATED", "DELIVERY_UNKNOWN"]
+      "enum": ["IMPLEMENTATION_ACTIVE", "IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVE", "CHANGES_REQUESTED", "CORRECTION_ACTIVE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED", "ESCALATED"]
     },
-    "lifecycle_event": { "type": "string", "enum": ["IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVATE", "CHANGES_REQUESTED", "CORRECTION_ACTIVATE", "REVIEW_ACCEPTED", "DELIVERY_CELL_COMPLETED", "HUMAN_MERGE_READY", "BLOCKED", "ESCALATED", "DELIVERY_UNKNOWN"] },
+    "lifecycle_event": { "type": "string", "enum": ["IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVATE", "CHANGES_REQUESTED", "CORRECTION_ACTIVATE", "REVIEW_ACCEPTED", "DELIVERY_CELL_COMPLETED", "HUMAN_MERGE_READY", "BLOCKED", "ESCALATED"] },
+    "delivery_state": { "type": ["string", "null"], "enum": ["PENDING", "DELIVERED", "NOT_DELIVERED", "DELIVERY_UNKNOWN", null] },
     "source_task_key": { "type": "string", "pattern": "^issue-[1-9][0-9]*-[a-z][a-z0-9-]*$" },
     "target_task_key": { "type": "string", "pattern": "^issue-[1-9][0-9]*-[a-z][a-z0-9-]*$" },
     "recipient_task_keys": { "$ref": "#/$defs/stringList" },
@@ -97,7 +98,7 @@
         "local_gates": { "type": "string", "enum": ["passed", "failed", "pending", "not_run"] },
         "ci_status": { "type": "string", "enum": ["passed", "failed", "pending", "not_run"] },
         "required_checks": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["name", "status"], "properties": { "name": { "type": "string", "minLength": 1 }, "status": { "type": "string", "enum": ["passed", "failed", "pending", "not_run"] } } }, "uniqueItems": true },
-        "implementation_status": { "type": "string", "enum": ["ready"] }, "qa_status": { "type": "string", "enum": ["pending", "passed", "changes_requested"] }, "review_status": { "type": "string", "enum": ["pending", "accepted", "changes_requested"] }, "implementation_evidence": { "type": "string", "minLength": 1 }, "qa_evidence": { "type": "string", "minLength": 1 }, "review_evidence": { "type": "string", "minLength": 1 }
+        "implementation_evidence": { "$ref": "#/$defs/roleEvidence" }, "qa_evidence": { "$ref": "#/$defs/roleEvidence" }, "review_evidence": { "$ref": "#/$defs/roleEvidence" }
       }
     },
     "blocked_fallback": { "type": ["object", "null"], "additionalProperties": false, "properties": {
@@ -129,6 +130,19 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true
+    },
+    "roleEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "pull_request_url", "commit_sha", "local_gates", "ci_status", "required_checks"],
+      "properties": {
+        "role": { "type": "string", "enum": ["implementation", "qa", "reviewer"] },
+        "pull_request_url": { "type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$" },
+        "commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "local_gates": { "type": "string", "const": "passed" },
+        "ci_status": { "type": "string", "const": "passed" },
+        "required_checks": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false, "required": ["name", "status"], "properties": { "name": { "type": "string", "minLength": 1 }, "status": { "type": "string", "const": "passed" } } }, "uniqueItems": true }
+      }
     }
   }
 }

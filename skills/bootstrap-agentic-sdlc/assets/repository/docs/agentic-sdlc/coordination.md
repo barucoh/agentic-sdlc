@@ -50,11 +50,9 @@ stateDiagram-v2
   QA_PASSED --> BLOCKED
   REVIEW_ACTIVE --> BLOCKED
   CORRECTION_ACTIVE --> BLOCKED
-  DELIVERY_UNKNOWN --> IMPLEMENTATION_READY: reconcile applied
-  DELIVERY_UNKNOWN --> CORRECTION_ACTIVE: reconcile absent/retry
 ```
 
-Every peer operation has a UUID, per-recipient delivery UUIDs for fan-out, a 20-30 second watchdog, per-target record, exact operation reconciliation before retry, `DELIVERY_UNKNOWN` for uncertainty, and a GitHub-reconstructible copy/paste fallback. An unknown peer wake-up recovers from durable GitHub evidence without duplicating a transition. Delivered/applied operations are terminal and immutable. Any active IM, QA, or RV role may send `BLOCKED`, `ESCALATED`, or `DELIVERY_UNKNOWN` directly to CO with exact evidence and fallback; CO cannot relay routine peer events.
+Every peer lifecycle event has one UUID and each fan-out wake-up has its own child delivery UUID, parent link, attempt count, delivery state, reconciliation result, and retry state. `DELIVERY_UNKNOWN` is a per-recipient transport overlay, never a lifecycle state: reconciling one child cannot replay the parent state change or affect a sibling. An unknown peer wake-up recovers from durable GitHub evidence without duplicating a transition. Delivered/applied child deliveries are terminal and immutable. Any active IM, QA, or RV role may send `BLOCKED` or `ESCALATED` directly to CO with exact evidence and fallback; CO cannot relay routine peer events.
 
 ## Glossary
 

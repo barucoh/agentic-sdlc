@@ -1,16 +1,16 @@
 {
   "files": {
-    ".agentic-sdlc/config.yaml": "8369e3761d14736e8786b49fefc1e1e91274510996069f2d68fcfa5f5c1cf7ba",
-    ".agentic-sdlc/handoff-template.json": "7a682ad2e50317aa1f19e866b4b698d7e9bff7bc04e99f830fd61233be9f6d20",
-    ".agentic-sdlc/handoff.schema.json": "ec1b17f1d93d916312ed418d28de14f597b3211b7ff4369e26c54151432e9ceb",
+    ".agentic-sdlc/config.yaml": "b656c59cedead6bf47fdb032b6180f2ae4a03af84e586ed030677de944920798",
+    ".agentic-sdlc/handoff-template.json": "43317362451ae116c629405232d7a2542f8a0c8ea075211b3a59202a089f52dc",
+    ".agentic-sdlc/handoff.schema.json": "7b42f0f7486b8a4216bfa12e56fc8c1cbd7bbd2364a25bc3d527ae633b3a272f",
     ".codex/agents/architecture.toml": "5032b67f3d3aad6de677b09cb1fa5248aed410ff3423c2127dea348789de31ee",
-    ".codex/agents/coordinator.toml": "aa177db280573268bc68b4972a7b279ee23c60c8fea7a0c1463b48a4c512dae2",
-    ".codex/agents/implementation.toml": "2fcc56c65c924830ffe3d08ec624257c9e8af6e02b9d681f6fb85c0c256b69cb",
+    ".codex/agents/coordinator.toml": "c4357c4888b3d8cf11b0e06c53e8f204a1c13fd276fe0509acb5291c40f6391b",
+    ".codex/agents/implementation.toml": "1afe55dc673f507474e9e131aa295ad586eb6448cdc1ac113626217f1fa3298b",
     ".codex/agents/knowledge_steward.toml": "5baa394c58a6e3042422c99c7b87e61791dbe1bf4a76a270219f45178605b412",
     ".codex/agents/product.toml": "67bf6547ef110c070ce5d010ad85470fd03320049a5f5447f3bf6b67e5acb0f7",
-    ".codex/agents/qa.toml": "c2624ccbe918136f2c4e68e3e3319c39b7717e89574373dc42eb92d3995d2e17",
-    ".codex/agents/reviewer.toml": "85cc280e660bc2b265adb5a9a07140c1aa2a0358e3d49217cae7b5ebf6564a94",
-    "docs/agentic-sdlc/coordination.md": "b3b6d9b373f2eeb33303f89b858c7e053184bb2ef30fbfddd4a6c61e4ced6939",
+    ".codex/agents/qa.toml": "9cd2bfdd0277503123980ffcc86188686ce51aee729bd396d966f602d6a4b1b6",
+    ".codex/agents/reviewer.toml": "a7783a345ab4a82399f10748aee80b6def47905c3737a92f8643f86cbd320670",
+    "docs/agentic-sdlc/coordination.md": "debfeb501a1bc7099a62a8cb213193fe433d39d078e3b33326a184d9c85c2307",
     "docs/agentic-sdlc/role-contracts.md": "1aa57b366fe1a99e5b0b25234a9f49a4a3e104d1119e863325f741e14aaedc98"
   },
   "managed_blocks": {
