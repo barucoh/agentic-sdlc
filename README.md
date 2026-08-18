@@ -2,7 +2,7 @@
 
 A public Codex plugin for repository-native, issue-driven software delivery.
 
-Agentic SDLC installs reusable workflows while keeping project knowledge in the repository. It provides complete role contracts, versioned structured handoffs, resilient cross-task recovery, selective ADR discovery, deterministic upgrades, and a one-issue/one-task/one-worktree/one-branch/one-PR delivery model.
+Agentic SDLC installs reusable workflows while keeping project knowledge in the repository. It provides complete role contracts, versioned structured handoffs, resilient cross-task recovery, selective ADR discovery, deterministic upgrades, and a one issue = one delivery cell = one writable Implementation worktree/branch = one PR model; QA and Reviewer use distinct subordinate, non-authoritative tasks/workspaces.
 
 ## Install during development
 

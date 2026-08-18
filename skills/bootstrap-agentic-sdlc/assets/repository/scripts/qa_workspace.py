@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -30,6 +31,10 @@ class WorkspaceVerification:
     cleanup_responsibility: str
     before: WorkspaceSnapshot
     after: WorkspaceSnapshot
+    command: tuple[str, ...] = ()
+    exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
 
 
 def _git(workspace: Path, *args: str) -> str:
@@ -94,25 +99,43 @@ def verify_qa_workspace(
     implementation_branch: str,
     declared_outputs: Iterable[str] = (),
     intents: Iterable[str] = (),
+    command: Iterable[str] = (),
+    exit_code: int | None = None,
+    stdout: str = "",
+    stderr: str = "",
 ) -> WorkspaceVerification:
     outputs = tuple(sorted(output.replace("\\", "/").strip("/.") for output in declared_outputs if output.strip("/.")))
     errors: list[str] = []
+    if before.head != expected_sha:
+        errors.append("QA workspace pre-snapshot is not the exact expected implementation commit")
     if after.head != expected_sha:
         errors.append("QA workspace HEAD is not the exact expected implementation commit")
+    if before.head != after.head:
+        errors.append("QA workspace HEAD changed during behavioral verification")
+    if before.branch and before.branch == implementation_branch:
+        errors.append("QA workspace pre-snapshot must be detached or use a non-Implementation branch")
     if after.branch and after.branch == implementation_branch:
         errors.append("QA workspace must be detached or use a non-Implementation branch")
     forbidden = {"source-edit", "source_mutation", "commit", "push"}
     bad_intents = sorted(set(intents) & forbidden)
     if bad_intents:
         errors.append("QA intent contains forbidden actions: " + ", ".join(bad_intents))
+    if before.status or before.source_diff:
+        errors.append("QA workspace has pre-existing tracked source changes outside declared outputs")
     if before.status != after.status or before.source_diff != after.source_diff:
         errors.append("QA changed source or committed content outside declared cache/build/test outputs")
+    if exit_code is not None and exit_code != 0:
+        errors.append(f"behavioral command failed with exit code {exit_code}")
     return WorkspaceVerification(
         passed=not errors,
         errors=tuple(errors),
         cleanup_responsibility="Codex host/task-control provisions and removes the disposable worktree; this repository check verifies identity and drift but does not provision or delete it.",
         before=before,
         after=after,
+        command=tuple(command),
+        exit_code=exit_code,
+        stdout=stdout,
+        stderr=stderr,
     )
 
 
@@ -123,8 +146,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--implementation-branch", required=True)
     parser.add_argument("--declared-output", action="append", default=[])
     parser.add_argument("--intent", action="append", default=[])
-    args = parser.parse_args(argv)
+    raw = list(argv if argv is not None else sys.argv[1:])
+    if "--" not in raw:
+        parser.error("a behavioral command is required after --")
+    delimiter = raw.index("--")
+    args = parser.parse_args(raw[:delimiter])
+    command = raw[delimiter + 1 :]
+    if not command:
+        parser.error("a behavioral command is required after --")
     before = capture_snapshot(args.workspace, args.declared_output)
+    preflight = verify_qa_workspace(
+        before,
+        before,
+        expected_sha=args.expected_sha,
+        implementation_branch=args.implementation_branch,
+        declared_outputs=args.declared_output,
+        intents=args.intent,
+        command=command,
+        exit_code=0,
+    )
+    if not preflight.passed:
+        print(json.dumps(asdict(preflight), indent=2))
+        return 2
+    completed = subprocess.run(command, cwd=args.workspace, text=True, capture_output=True, check=False, shell=False)
     after = capture_snapshot(args.workspace, args.declared_output)
     result = verify_qa_workspace(
         before,
@@ -133,6 +177,10 @@ def main(argv: list[str] | None = None) -> int:
         implementation_branch=args.implementation_branch,
         declared_outputs=args.declared_output,
         intents=args.intent,
+        command=command,
+        exit_code=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
     )
     print(json.dumps(asdict(result), indent=2))
     return 0 if result.passed else 2

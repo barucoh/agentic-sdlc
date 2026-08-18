@@ -36,7 +36,7 @@ from coordination_protocol import (  # noqa: E402
     dispatch_issue_task,
     send_cross_task_handoff,
 )
-from qa_workspace import capture_snapshot, verify_qa_workspace  # noqa: E402
+from qa_workspace import WorkspaceSnapshot, capture_snapshot, verify_qa_workspace  # noqa: E402
 import manage_repository  # noqa: E402
 
 
@@ -271,9 +271,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertIn("source mutation", contract)
 
     def test_qa_workspace_check_binds_exact_head_and_rejects_source_intent(self) -> None:
-        workspace = ROOT
-        before = capture_snapshot(workspace, [".pytest_cache", "build", "dist"])
-        after = capture_snapshot(workspace, [".pytest_cache", "build", "dist"])
+        before = WorkspaceSnapshot(head="a" * 40, branch="", status=(), source_diff="")
+        after = WorkspaceSnapshot(head="a" * 40, branch="", status=(), source_diff="")
         valid = verify_qa_workspace(
             before,
             after,
@@ -294,6 +293,15 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertFalse(invalid.passed)
         self.assertTrue(any("exact expected" in error for error in invalid.errors))
         self.assertTrue(any("forbidden" in error for error in invalid.errors))
+
+    def test_qa_workspace_rejects_preexisting_dirty_snapshot(self) -> None:
+        clean = WorkspaceSnapshot(head="a" * 40, branch="", status=(), source_diff="")
+        dirty = WorkspaceSnapshot(head="a" * 40, branch="", status=(" M source.py",), source_diff="diff")
+        result = verify_qa_workspace(dirty, dirty, expected_sha="a" * 40, implementation_branch="main", exit_code=0)
+        self.assertFalse(result.passed)
+        self.assertIn("pre-existing", " ".join(result.errors))
+        self.assertEqual(result.before.head, result.after.head)
+        self.assertTrue(verify_qa_workspace(clean, clean, expected_sha="a" * 40, implementation_branch="main").passed)
 
     def test_cycle4_direction_identity_and_typed_intent_guards(self) -> None:
         lifecycle = self.lifecycle()
@@ -872,6 +880,82 @@ class RepositoryStateTests(unittest.TestCase):
         shutil.copytree(ROOT / "tests/fixtures" / name, target)
         return target
 
+    def qa_repository(self) -> tuple[Path, str]:
+        temporary = ROOT / "tests" / ".tmp" / str(uuid4())
+        temporary.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, temporary, ignore_errors=True)
+        target = temporary / "qa"
+        target.mkdir()
+        def run(*args: str) -> str:
+            result = subprocess.run(["git", *args], cwd=target, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.strip()
+        run("init")
+        run("config", "user.email", "qa@example.com")
+        run("config", "user.name", "QA")
+        (target / "source.txt").write_text("source\n", encoding="utf-8")
+        run("add", "source.txt")
+        run("commit", "-m", "initial")
+        run("branch", "-M", "main")
+        sha = run("rev-parse", "HEAD")
+        run("checkout", "--detach", sha)
+        return target, sha
+
+    def run_qa_cli(self, target: Path, sha: str, code: str, *options: str) -> subprocess.CompletedProcess[str]:
+        command = [
+            sys.executable,
+            str(ROOT / "scripts" / "qa_workspace.py"),
+            str(target),
+            "--expected-sha",
+            sha,
+            "--implementation-branch",
+            "main",
+            *options,
+            "--",
+            sys.executable,
+            "-c",
+            code,
+        ]
+        return subprocess.run(command, text=True, capture_output=True, check=False)
+
+    def test_qa_cli_executes_shell_free_command_and_reports_both_snapshots(self) -> None:
+        target, sha = self.qa_repository()
+        result = self.run_qa_cli(target, sha, "pass")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["before"]["head"], sha)
+        self.assertEqual(payload["after"]["head"], sha)
+        self.assertEqual(payload["exit_code"], 0)
+        self.assertTrue(payload["command"])
+
+    def test_qa_cli_allows_declared_output_but_rejects_preexisting_source(self) -> None:
+        target, sha = self.qa_repository()
+        result = self.run_qa_cli(target, sha, "from pathlib import Path; Path('cache').mkdir(); Path('cache/result.txt').write_text('ok')", "--declared-output", "cache")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (target / "source.txt").write_text("dirty\n", encoding="utf-8")
+        blocked = self.run_qa_cli(target, sha, "from pathlib import Path; Path('ran').write_text('no')")
+        self.assertEqual(blocked.returncode, 2)
+        self.assertIn("pre-existing", blocked.stdout)
+        self.assertFalse((target / "ran").exists())
+
+    def test_qa_cli_rejects_source_head_branch_and_failing_command(self) -> None:
+        target, sha = self.qa_repository()
+        mutated = self.run_qa_cli(target, sha, "from pathlib import Path; Path('source.txt').write_text('mutated')")
+        self.assertEqual(mutated.returncode, 2)
+        self.assertIn("source", mutated.stdout.lower())
+        target, sha = self.qa_repository()
+        committed = self.run_qa_cli(target, sha, "import subprocess; subprocess.run(['git','commit','--allow-empty','-m','mutated'], check=True)")
+        self.assertEqual(committed.returncode, 2)
+        self.assertIn("HEAD", committed.stdout)
+        target, sha = self.qa_repository()
+        attached = self.run_qa_cli(target, sha, "import subprocess; subprocess.run(['git','switch','main'], check=True)")
+        self.assertEqual(attached.returncode, 2)
+        self.assertIn("Implementation branch", attached.stdout)
+        target, sha = self.qa_repository()
+        failed = self.run_qa_cli(target, sha, "raise SystemExit(3)")
+        self.assertEqual(failed.returncode, 2)
+        self.assertIn("exit code 3", failed.stdout)
+
     def apply_fixture(self, name: str, project_name: str) -> tuple[Path, list[manage_repository.Action]]:
         target = self.copy_fixture(name)
         actions, writes, obsolete = manage_repository.plan(target, project_name)
@@ -921,6 +1005,30 @@ class RepositoryStateTests(unittest.TestCase):
         actions, _, _ = manage_repository.plan(target, "Fresh Fixture")
         self.assertFalse([action for action in actions if action.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
         runtime = target / "scripts/qa_workspace.py"
+        qa_target, qa_sha = self.qa_repository()
+        installed_cli = subprocess.run(
+            [
+                sys.executable,
+                str(runtime),
+                str(qa_target),
+                "--expected-sha",
+                qa_sha,
+                "--implementation-branch",
+                "main",
+                "--",
+                sys.executable,
+                "-c",
+                "pass",
+            ],
+            text=True,
+            capture_output=True,
+            cwd=target,
+            check=False,
+        )
+        self.assertEqual(installed_cli.returncode, 0, installed_cli.stdout + installed_cli.stderr)
+        installed_payload = json.loads(installed_cli.stdout)
+        self.assertEqual(installed_payload["before"]["head"], qa_sha)
+        self.assertEqual(installed_payload["after"]["head"], qa_sha)
         runtime.write_text(runtime.read_text(encoding="utf-8") + "\n# local drift\n", encoding="utf-8")
         actions, _, _ = manage_repository.plan(target, "Fresh Fixture")
         self.assertIn(("conflict", "scripts/qa_workspace.py"), {(a.classification, a.path.as_posix()) for a in actions})
