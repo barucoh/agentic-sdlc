@@ -393,7 +393,9 @@ def apply(target: Path, writes: dict[Path, str], delete_obsolete: str | None, pr
         raise RuntimeError("managed-state validation failed: AGENTS.md block")
     manifest = target / MANIFEST_PATH
     manifest.parent.mkdir(parents=True, exist_ok=True)
-    manifest.write_text(desired_manifest_text(project_name), encoding="utf-8", newline="\n")
+    desired_manifest = desired_manifest_text(project_name).encode("utf-8")
+    if not manifest.exists() or manifest.read_bytes() != desired_manifest:
+        manifest.write_bytes(desired_manifest)
 
 
 def main() -> int:

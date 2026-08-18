@@ -27,6 +27,7 @@ from coordination_protocol import (  # noqa: E402
     SESSION_TITLE_MAX_CHARACTERS,
     TargetOperation,
     format_session_title,
+    lifecycle_routes,
     lifecycle_tuple,
     session_title_for_role,
     validate_handoff,
@@ -156,6 +157,10 @@ class HandoffAndCoordinationTests(unittest.TestCase):
 
     def peer_transition(self, lifecycle: CoordinatorLifecycle, next_state: LifecycleState, operation_id: str, evidence: dict | None = None, **kwargs: object) -> LifecycleState:
         """Drive the protocol as the peer that owns the authoritative source key."""
+        if next_state in {LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY}:
+            if evidence is None:
+                evidence = {"commit_sha": lifecycle._artifact[1], "pull_request_url": lifecycle._artifact[0], "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
+            evidence = {**evidence, "implementation_status": "ready", "qa_status": "passed", "review_status": "accepted", "implementation_evidence": "https://github.com/o/r/pull/6", "qa_evidence": "https://github.com/o/r/pull/6", "review_evidence": "https://github.com/o/r/pull/6"}
         event = kwargs.get("event") or lifecycle._event_for(next_state)
         source = kwargs.get("source_task_key")
         target = kwargs.get("target_task_key")
@@ -165,6 +170,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             source, target = route[2:]
             kwargs["source_task_key"] = source
             kwargs["target_task_key"] = target
+        route = next(item for item in lifecycle_routes(lifecycle.issue_number, lifecycle.state, next_state, event) if item[2] == source and target in item[3])
+        kwargs.setdefault("recipient_operation_ids", {key: str(uuid4()) for key in route[3]})
         self.assertIsInstance(source, str)
         actor = source.rsplit("-", 1)[1]
         return lifecycle.transition(actor, next_state, operation_id, evidence, **kwargs)
@@ -179,6 +186,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             source, target = route[2:]
             kwargs["source_task_key"] = source
             kwargs["target_task_key"] = target
+        route = next(item for item in lifecycle_routes(lifecycle.issue_number, lifecycle.state, intended_state, event) if item[2] == source and target in item[3])
+        kwargs.setdefault("recipient_operation_ids", {key: str(uuid4()) for key in route[3]})
         self.assertIsInstance(source, str)
         actor = source.rsplit("-", 1)[1]
         return lifecycle.observe_delivery_unknown(actor, operation_id, intended_state, evidence, **kwargs)
@@ -237,6 +246,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         blocked.update({"lifecycle_state": "BLOCKED", "lifecycle_event": "BLOCKED", "from_role": "coordinator", "to_role": "coordinator", "source_task_key": "issue-1-coordinator", "target_task_key": "issue-1-coordinator", "target_model": "gpt-5.6-sol", "effort": "Medium", "sandbox_mode": "read-only"})
         self.assertTrue(validate_handoff(blocked))
         blocked["blocked_fallback"] = {"repository": "OWNER/REPOSITORY", "issue_or_pr_url": "https://github.com/OWNER/REPOSITORY/issues/1", "operation_id": blocked["operation_id"], "objective": "Recover", "expected_output": "Handoff", "evidence": "PR evidence", "next_owner": "coordinator"}
+        blocked["recipient_task_keys"] = ["issue-1-coordinator"]
+        blocked["recipient_operation_ids"] = ["00000000-0000-4000-8000-000000000003"]
         self.assertEqual(validate_handoff(blocked), [])
 
     def test_cycle7_absent_retry_and_canonical_repository_binding(self) -> None:
@@ -361,16 +372,27 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         with self.assertRaises(LifecycleTransitionError):
             lifecycle.transition("implementation", LifecycleState.IMPLEMENTATION_READY, operation_id, evidence)
 
+    def test_delivery_cell_fanout_and_terminal_evidence_are_immutable(self) -> None:
+        lifecycle = self.lifecycle()
+        evidence = {"commit_sha": "a" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}
+        lifecycle.bind_delivery_artifact(str(uuid4()), evidence["pull_request_url"], evidence["commit_sha"])
+        operation_id = str(uuid4())
+        recipients = {"issue-5-qa": str(uuid4()), "issue-5-reviewer": str(uuid4())}
+        lifecycle.transition("implementation", LifecycleState.IMPLEMENTATION_READY, operation_id, evidence, source_task_key="issue-5-implementation", target_task_key="issue-5-qa", recipient_operation_ids=recipients)
+        self.assertEqual(lifecycle._operations[operation_id].recipient_task_keys, ("issue-5-qa", "issue-5-reviewer"))
+        with self.assertRaises(LifecycleTransitionError):
+            lifecycle.transition("qa", LifecycleState.QA_PASSED, str(uuid4()), evidence, source_task_key="issue-5-qa", target_task_key="issue-5-reviewer", recipient_operation_ids={"issue-5-reviewer": str(uuid4()), "issue-5-implementation": str(uuid4())})
+
     def test_delivery_cell_documentation_uses_current_role_name_and_diagrams(self) -> None:
         legacy_name = "scr" + "ibe"
         matches = []
-        for path in ROOT.rglob("*"):
-            if path.is_file() and ".git" not in path.parts:
-                try:
-                    if re.search(r"\b" + legacy_name + r"\b", path.read_text(encoding="utf-8"), re.IGNORECASE):
-                        matches.append(path)
-                except UnicodeDecodeError:
-                    pass
+        for relative in subprocess.run(["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.splitlines():
+            path = ROOT / relative
+            try:
+                if re.search(r"\b" + legacy_name + r"\b", path.read_text(encoding="utf-8"), re.IGNORECASE):
+                    matches.append(path)
+            except UnicodeDecodeError:
+                pass
         self.assertEqual(matches, [])
         coordination = (ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/docs/agentic-sdlc/coordination.md").read_text(encoding="utf-8")
         self.assertIn("KS Knowledge Steward", coordination)
@@ -653,6 +675,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 "readiness_evidence": {"commit_sha": "d" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]},
             }
         )
+        reviewer["recipient_task_keys"] = ["issue-1-reviewer"]
+        reviewer["recipient_operation_ids"] = ["00000000-0000-4000-8000-000000000004"]
         self.assertEqual(validate_handoff(reviewer), [])
         reviewer["target_model"] = "gpt-5.6-luna"
         self.assertTrue(validate_handoff(reviewer))

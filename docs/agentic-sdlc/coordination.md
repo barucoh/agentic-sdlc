@@ -10,17 +10,21 @@ Coordinator establishes authoritative issue scope, creates or binds the dedicate
 ```mermaid
 flowchart LR
   CO["CO Coordinator: scope, cell binding, watchdog"]
+  PD["PD Product: value and acceptance"]
+  AR["AR Architecture: constraints and ADRs"]
   IM["IM Implementation: PR and exact SHA"]
   QA["QA: independent acceptance verification"]
   RV["RV Reviewer: delivery-cell verification lead"]
   KS["KS Knowledge Steward: canonical knowledge"]
   GH[("GitHub durable authority")]
-  CO --> IM & QA & RV
+  CO -->|Activate dedicated QA/RV task for this issue| IM & QA & RV
+  PD --> CO
+  AR --> CO
   IM -->|IMPLEMENTATION_READY| QA & RV
   QA -->|QA_PASSED or QA_CHANGES_REQUESTED| RV & IM
   RV -->|CHANGES_REQUESTED| IM
   RV -->|DELIVERY_CELL_COMPLETED| CO
-  IM & QA & RV & KS --> GH
+  PD & AR & IM & QA & RV & KS --> GH
   GH -.reconcile uncertain transport.-> CO
 ```
 
@@ -50,7 +54,11 @@ stateDiagram-v2
   DELIVERY_UNKNOWN --> CORRECTION_ACTIVE: reconcile absent/retry
 ```
 
-Every peer operation has a UUID, 20-30 second watchdog, per-target record, exact operation reconciliation before retry, `DELIVERY_UNKNOWN` for uncertainty, and a GitHub-reconstructible copy/paste fallback. An unknown peer wake-up recovers from durable GitHub evidence without duplicating a transition. Delivered/applied operations are terminal and immutable.
+Every peer operation has a UUID, per-recipient delivery UUIDs for fan-out, a 20-30 second watchdog, per-target record, exact operation reconciliation before retry, `DELIVERY_UNKNOWN` for uncertainty, and a GitHub-reconstructible copy/paste fallback. An unknown peer wake-up recovers from durable GitHub evidence without duplicating a transition. Delivered/applied operations are terminal and immutable. Any active IM, QA, or RV role may send `BLOCKED`, `ESCALATED`, or `DELIVERY_UNKNOWN` directly to CO with exact evidence and fallback; CO cannot relay routine peer events.
+
+## Glossary
+
+An **exact commit SHA** is the immutable 40-character Git commit identifier that must match the PR, implementation, QA, review, CI, and terminal evidence. **Machine-local task activation** means binding a dedicated visible task handle on the current host; the handle is transport-only and is never committed.
 
 ## Native primitives decision
 

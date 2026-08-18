@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -133,13 +134,14 @@ if SESSION_TITLE_FORMAT != "#{issue_number} {role_code} - {issue_title}":
 if (template_root / ".codex/config.toml").exists():
     errors.append("generated repository must not use obsolete .codex/config.toml role registry")
 
-for path in ROOT.rglob("*"):
-    if path.is_file() and ".git" not in path.parts:
-        try:
-            if re.search(r"\bscribe\b", path.read_text(encoding="utf-8"), re.IGNORECASE):
-                errors.append(f"legacy role name occurs in {path.relative_to(ROOT)}")
-        except UnicodeDecodeError:
-            continue
+legacy_name = "scr" + "ibe"
+for relative in subprocess.run(["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.splitlines():
+    path = ROOT / relative
+    try:
+        if re.search(r"\b" + legacy_name + r"\b", path.read_text(encoding="utf-8"), re.IGNORECASE):
+            errors.append(f"legacy role name occurs in {relative}")
+    except UnicodeDecodeError:
+        continue
 
 schema_path = template_root / ".agentic-sdlc/handoff.schema.json"
 template_path = template_root / ".agentic-sdlc/handoff-template.json"

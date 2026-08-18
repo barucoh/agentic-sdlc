@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from uuid import NAMESPACE_URL, uuid5
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -212,41 +213,47 @@ def validate_routing(value: dict[str, Any]) -> list[str]:
     return errors
 
 
-def lifecycle_tuple(issue: int, current: LifecycleState, nxt: LifecycleState, event: str | None = None) -> tuple[str, str, str, str] | None:
-    """Single authority for lifecycle sender/receiver roles and logical keys."""
+def lifecycle_routes(issue: int, current: LifecycleState, nxt: LifecycleState, event: str | None = None) -> tuple[tuple[str, tuple[str, ...], str, tuple[str, ...]], ...]:
+    """Authoritative peer routes, including one-event fan-out recipients."""
     if event is None:
-        return None
+        return ()
     pairs = {
-        (LifecycleState.IMPLEMENTATION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): ("implementation", "qa"),
-        (LifecycleState.CORRECTION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): ("implementation", "qa"),
-        (LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_PASSED): ("qa", "reviewer"),
-        (LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_CHANGES_REQUESTED): ("qa", "implementation"),
-        (LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACTIVE): ("qa", "reviewer"),
-        (LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED): ("reviewer", "implementation"),
-        (LifecycleState.REVIEW_ACTIVE, LifecycleState.REVIEW_ACCEPTED): ("reviewer", "reviewer"),
-        (LifecycleState.QA_CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): ("qa", "implementation"),
-        (LifecycleState.CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): ("reviewer", "implementation"),
-        (LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY): ("reviewer", "coordinator"),
-        (LifecycleState.IMPLEMENTATION_ACTIVE, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
-        (LifecycleState.IMPLEMENTATION_READY, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
-        (LifecycleState.REVIEW_ACTIVE, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
-        (LifecycleState.CHANGES_REQUESTED, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
-        (LifecycleState.CORRECTION_ACTIVE, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
-        (LifecycleState.REVIEW_ACCEPTED, LifecycleState.BLOCKED): ("coordinator", "coordinator"),
+        (LifecycleState.IMPLEMENTATION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): ("implementation", ("qa", "reviewer")),
+        (LifecycleState.CORRECTION_ACTIVE, LifecycleState.IMPLEMENTATION_READY): ("implementation", ("qa", "reviewer")),
+        (LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_PASSED): ("qa", ("reviewer", "implementation")),
+        (LifecycleState.IMPLEMENTATION_READY, LifecycleState.QA_CHANGES_REQUESTED): ("qa", ("reviewer", "implementation")),
+        (LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACTIVE): ("qa", ("reviewer",)),
+        (LifecycleState.REVIEW_ACTIVE, LifecycleState.CHANGES_REQUESTED): ("reviewer", ("implementation",)),
+        (LifecycleState.REVIEW_ACTIVE, LifecycleState.REVIEW_ACCEPTED): ("reviewer", ("reviewer",)),
+        (LifecycleState.QA_CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): ("qa", ("implementation",)),
+        (LifecycleState.CHANGES_REQUESTED, LifecycleState.CORRECTION_ACTIVE): ("reviewer", ("implementation",)),
+        (LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY): ("reviewer", ("coordinator",)),
     }
-    roles = pairs.get((current, nxt))
+    if nxt in {LifecycleState.BLOCKED, LifecycleState.ESCALATED, LifecycleState.DELIVERY_UNKNOWN}:
+        roles = tuple((role, ("coordinator",)) for role in ("implementation", "qa", "reviewer", "coordinator"))
+    else:
+        pair = pairs.get((current, nxt))
+        roles = (pair,) if pair else ()
     if not roles:
-        return None
+        return ()
     events = {
         LifecycleState.IMPLEMENTATION_READY: "IMPLEMENTATION_READY", LifecycleState.QA_PASSED: "QA_PASSED", LifecycleState.QA_CHANGES_REQUESTED: "QA_CHANGES_REQUESTED", LifecycleState.REVIEW_ACTIVE: "REVIEW_ACTIVATE",
         LifecycleState.CHANGES_REQUESTED: "CHANGES_REQUESTED", LifecycleState.CORRECTION_ACTIVE: "CORRECTION_ACTIVATE",
         LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED", LifecycleState.HUMAN_MERGE_READY: "DELIVERY_CELL_COMPLETED",
-        LifecycleState.BLOCKED: "BLOCKED",
+        LifecycleState.BLOCKED: "BLOCKED", LifecycleState.ESCALATED: "ESCALATED", LifecycleState.DELIVERY_UNKNOWN: "DELIVERY_UNKNOWN",
     }
     if events.get(nxt) != event:
+        return ()
+    return tuple((source, targets, f"issue-{issue}-{source.replace('_', '-')}", tuple(f"issue-{issue}-{target.replace('_', '-')}" for target in targets)) for source, targets in roles)
+
+
+def lifecycle_tuple(issue: int, current: LifecycleState, nxt: LifecycleState, event: str | None = None) -> tuple[str, str, str, str] | None:
+    """Compatibility view of the first recipient; use lifecycle_routes for fan-out."""
+    routes = lifecycle_routes(issue, current, nxt, event)
+    if not routes:
         return None
-    source, target = roles
-    return source, target, f"issue-{issue}-{source.replace('_', '-')}", f"issue-{issue}-{target.replace('_', '-')}"
+    source, targets, source_key, target_keys = routes[0]
+    return source, targets[0], source_key, target_keys[0]
 
 
 def canonicalize_and_validate_fallback(fallback: Any, operation_id: str, work_item: CanonicalWorkItem | None = None) -> dict[str, str] | None:
@@ -279,11 +286,10 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
         nxt = LifecycleState(state)
     except ValueError:
         return ["unknown lifecycle state"]
-    possible = [lifecycle_tuple(issue, current, nxt, value.get("lifecycle_event")) for current in LifecycleState]
-    allowed = [item for item in possible if item]
+    allowed = [item for current in LifecycleState for item in lifecycle_routes(issue, current, nxt, value.get("lifecycle_event"))]
     if state not in {LifecycleState.IMPLEMENTATION_ACTIVE.value, LifecycleState.DELIVERY_UNKNOWN.value} and not any(
-        value.get("from_role") == src and value.get("to_role") == dst and value.get("source_task_key") == source_key and value.get("target_task_key") == target_key
-        for src, dst, source_key, target_key in allowed
+        value.get("from_role") == src and value.get("to_role") == targets[0] and value.get("source_task_key") == source_key and value.get("target_task_key") == target_keys[0]
+        for src, targets, source_key, target_keys in allowed
     ):
         errors.append("lifecycle sender, receiver, and logical keys are not an allowed event tuple")
     readiness = value.get("readiness_evidence")
@@ -292,6 +298,11 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
             errors.append("lifecycle readiness requires typed passed evidence")
         elif readiness.get("commit_sha") != work_item.get("commit_sha") or readiness.get("pull_request_url") != work_item.get("pull_request_url"):
             errors.append("readiness evidence must exactly match canonical work item PR and SHA")
+    expected_recipients = next((keys for src, targets, source, keys in allowed if value.get("from_role") == src and value.get("source_task_key") == source and value.get("target_task_key") == keys[0]), ())
+    recipients = value.get("recipient_task_keys")
+    recipient_ids = value.get("recipient_operation_ids")
+    if tuple(recipients or ()) != expected_recipients or not isinstance(recipient_ids, list) or len(recipient_ids) != len(expected_recipients) or len(set(recipient_ids)) != len(recipient_ids) or any(not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", item) for item in recipient_ids):
+        errors.append("lifecycle handoff must carry exact unique per-recipient delivery operation IDs")
     if state == LifecycleState.IMPLEMENTATION_READY.value:
         if not re.fullmatch(r"[0-9a-f]{40}", str(work_item.get("commit_sha") or "")):
             errors.append("IMPLEMENTATION_READY requires an exact commit SHA")
@@ -307,6 +318,8 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
             errors.append("CORRECTION_ACTIVE must return to the same Implementation task")
     if state == LifecycleState.HUMAN_MERGE_READY.value and value.get("terminal_state") != "completed":
         errors.append("HUMAN_MERGE_READY requires completed non-human gates")
+    if state in {LifecycleState.QA_PASSED.value, LifecycleState.REVIEW_ACCEPTED.value, LifecycleState.HUMAN_MERGE_READY.value} and not _valid_delivery_evidence(readiness, work_item, nxt):
+        errors.append("delivery-cell completion requires exact typed implementation, QA, and review evidence")
     if state == LifecycleState.BLOCKED.value:
         fallback = value.get("blocked_fallback")
         if canonicalize_and_validate_fallback(fallback, value.get("operation_id", ""), canonical_work_item) is None:
@@ -344,6 +357,17 @@ def _valid_readiness_evidence(evidence: Any, work_item: dict[str, Any] | None = 
     return True
 
 
+def _valid_delivery_evidence(evidence: Any, work_item: dict[str, Any] | None, state: "LifecycleState") -> bool:
+    if not _valid_readiness_evidence(evidence, work_item):
+        return False
+    required = ("implementation_evidence", "qa_evidence", "review_evidence")
+    if any(not isinstance(evidence.get(field), str) or not evidence[field].strip() for field in required):
+        return False
+    if evidence.get("implementation_status") != "ready" or evidence.get("qa_status") != "passed":
+        return False
+    return state is LifecycleState.QA_PASSED or evidence.get("review_status") == "accepted"
+
+
 class DeliveryState(str, Enum):
     PENDING = "PENDING"
     DELIVERED = "DELIVERED"
@@ -375,6 +399,7 @@ class LifecycleState(str, Enum):
     CORRECTION_ACTIVE = "CORRECTION_ACTIVE"
     REVIEW_ACCEPTED = "REVIEW_ACCEPTED"
     HUMAN_MERGE_READY = "HUMAN_MERGE_READY"
+    ESCALATED = "ESCALATED"
     BLOCKED = "BLOCKED"
     DELIVERY_UNKNOWN = "DELIVERY_UNKNOWN"
 
@@ -432,6 +457,8 @@ class LifecycleOperationIntent:
     fallback: str | None
     artifact: tuple[str, str] | None
     correction_checkpoint: int | None
+    recipient_task_keys: tuple[str, ...]
+    recipient_operation_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -488,7 +515,7 @@ class CoordinatorLifecycle:
 
     def _direction(self, current: LifecycleState, nxt: LifecycleState, source: str, target: str, event: str | None = None) -> bool:
         allowed = lifecycle_tuple(self.issue_number, current, nxt, event)
-        return bool(allowed and allowed[2:] == (source, target))
+        return any(source == source_key and target in target_keys for _, _, source_key, target_keys in lifecycle_routes(self.issue_number, current, nxt, event))
 
     @staticmethod
     def _role_for_task_key(task_key: str) -> str | None:
@@ -548,6 +575,8 @@ class CoordinatorLifecycle:
             LifecycleState.REVIEW_ACCEPTED: "REVIEW_ACCEPTED",
             LifecycleState.HUMAN_MERGE_READY: "DELIVERY_CELL_COMPLETED",
             LifecycleState.BLOCKED: "BLOCKED",
+            LifecycleState.ESCALATED: "ESCALATED",
+            LifecycleState.DELIVERY_UNKNOWN: "DELIVERY_UNKNOWN",
         }.get(next_state)
 
     def _build_transition_intent(
@@ -559,8 +588,15 @@ class CoordinatorLifecycle:
         event: str,
         evidence: dict[str, Any] | None,
         fallback: dict[str, Any] | None,
+        recipient_operation_ids: dict[str, str] | None,
     ) -> LifecycleOperationIntent:
         artifact = self._artifact[:2] if self._artifact else None
+        route = next((item for item in lifecycle_routes(self.issue_number, self.state, next_state, event) if item[2] == source_task_key and target_task_key in item[3]), None)
+        recipients = route[3] if route else ()
+        if recipient_operation_ids is None:
+            recipient_operation_ids = {key: str(uuid5(NAMESPACE_URL, f"{operation_id}:{key}")) for key in recipients}
+        if tuple(recipient_operation_ids) != recipients or len(set(recipient_operation_ids.values())) != len(recipients) or any(not self._valid_operation(item) or item == operation_id for item in recipient_operation_ids.values()):
+            raise LifecycleTransitionError("lifecycle operation requires exact unique per-recipient delivery UUIDs")
         return LifecycleOperationIntent(
             operation_id,
             self.state,
@@ -572,6 +608,8 @@ class CoordinatorLifecycle:
             json.dumps(fallback, sort_keys=True, separators=(",", ":")) if fallback is not None else None,
             artifact,
             len(self._artifact_revisions) if next_state is LifecycleState.CORRECTION_ACTIVE else None,
+            recipients,
+            tuple(recipient_operation_ids[key] for key in recipients),
         )
 
     @staticmethod
@@ -598,10 +636,13 @@ class CoordinatorLifecycle:
                 raise LifecycleTransitionError("reconciliation requires DELIVERY_UNKNOWN")
         elif self.state is not intent.from_state:
             raise LifecycleTransitionError("operation intent no longer matches the current lifecycle state")
-        if intent.next_state not in self._TRANSITIONS.get(intent.from_state, set()) and intent.next_state is not LifecycleState.BLOCKED:
+        if intent.next_state not in self._TRANSITIONS.get(intent.from_state, set()) and intent.next_state not in {LifecycleState.BLOCKED, LifecycleState.ESCALATED, LifecycleState.DELIVERY_UNKNOWN}:
             raise LifecycleTransitionError("operation intent has an invalid lifecycle transition")
         if not self._direction(intent.from_state, intent.next_state, intent.source_task_key, intent.target_task_key, intent.event):
             raise LifecycleTransitionError("operation intent has an unauthorized lifecycle direction")
+        route = next((item for item in lifecycle_routes(self.issue_number, intent.from_state, intent.next_state, intent.event) if item[2] == intent.source_task_key and intent.target_task_key in item[3]), None)
+        if route is None or intent.recipient_task_keys != route[3] or len(intent.recipient_operation_ids) != len(route[3]) or len(set(intent.recipient_operation_ids)) != len(route[3]) or any(not self._valid_operation(item) or item == intent.operation_id for item in intent.recipient_operation_ids):
+            raise LifecycleTransitionError("operation intent has invalid per-recipient delivery records")
         current_artifact = self._artifact[:2] if self._artifact else None
         if intent.artifact != current_artifact:
             raise LifecycleTransitionError("operation intent no longer matches the authoritative artifact")
@@ -609,7 +650,7 @@ class CoordinatorLifecycle:
         if evidence is not None and not isinstance(evidence, dict):
             raise LifecycleTransitionError("operation intent has malformed readiness evidence")
         fallback: dict[str, Any] | None = None
-        if intent.next_state is LifecycleState.BLOCKED:
+        if intent.next_state in {LifecycleState.BLOCKED, LifecycleState.ESCALATED}:
             if intent.fallback is None:
                 raise LifecycleTransitionError("BLOCKED operation intent requires a reconstructible fallback")
             fallback = self._decode_canonical_json(intent.fallback)
@@ -617,7 +658,7 @@ class CoordinatorLifecycle:
             if canonical is None or fallback != canonical:
                 raise LifecycleTransitionError("BLOCKED operation intent has an invalid fallback")
         elif intent.fallback is not None:
-            raise LifecycleTransitionError("non-BLOCKED operation intent cannot include a fallback")
+            raise LifecycleTransitionError("non-escalation operation intent cannot include a fallback")
         if require_prerequisites and intent.next_state is LifecycleState.CORRECTION_ACTIVE:
             # Artifact binding is prohibited while DELIVERY_UNKNOWN is pending, so
             # the append-only revision count is stable through exact reconciliation.
@@ -627,6 +668,8 @@ class CoordinatorLifecycle:
             raise LifecycleTransitionError("non-correction operation intent has a checkpoint")
         if require_prerequisites and intent.next_state in {LifecycleState.IMPLEMENTATION_READY, LifecycleState.REVIEW_ACTIVE} and not self._bound_ready_evidence(evidence):
             raise LifecycleTransitionError("operation intent requires canonical passed readiness evidence")
+        if require_prerequisites and intent.next_state in {LifecycleState.QA_PASSED, LifecycleState.REVIEW_ACCEPTED, LifecycleState.HUMAN_MERGE_READY} and not _valid_delivery_evidence(evidence, {**self.work_item.as_dict(), "pull_request_url": self._artifact[0] if self._artifact else None, "commit_sha": self._artifact[1] if self._artifact else None}, intent.next_state):
+            raise LifecycleTransitionError("terminal delivery-cell operation requires exact typed QA and review evidence")
         if require_prerequisites and intent.next_state is LifecycleState.IMPLEMENTATION_READY and intent.from_state is LifecycleState.CORRECTION_ACTIVE and (self._correction_checkpoint is None or len(self._artifact_revisions) <= self._correction_checkpoint):
             raise LifecycleTransitionError("correction readiness requires a later artifact revision")
         return evidence
@@ -652,10 +695,11 @@ class CoordinatorLifecycle:
         target_task_key: str | None = None,
         event: str | None = None,
         fallback: dict[str, Any] | None = None,
+        recipient_operation_ids: dict[str, str] | None = None,
     ) -> LifecycleState:
         if not self._valid_operation(operation_id):
             raise LifecycleTransitionError("lifecycle transitions require a UUID operation ID")
-        if next_state is LifecycleState.BLOCKED:
+        if next_state in {LifecycleState.BLOCKED, LifecycleState.ESCALATED}:
             fallback = canonicalize_and_validate_fallback(fallback, operation_id, self.work_item)
             if fallback is None:
                 raise LifecycleTransitionError("BLOCKED requires a valid reconstructible fallback")
@@ -669,7 +713,7 @@ class CoordinatorLifecycle:
         if event is None:
             raise LifecycleTransitionError("lifecycle event is required")
         self._require_peer_actor(actor, source_task_key)
-        intent = self._build_transition_intent(operation_id, next_state, source_task_key, target_task_key, event, evidence, fallback)
+        intent = self._build_transition_intent(operation_id, next_state, source_task_key, target_task_key, event, evidence, fallback, recipient_operation_ids)
         self._validate_transition_intent(intent)
         prior = self._operations.get(operation_id)
         if prior is not None:
@@ -683,12 +727,12 @@ class CoordinatorLifecycle:
         self._operations[operation_id] = intent
         return self._apply_transition_intent(intent)
 
-    def observe_delivery_unknown(self, actor: str, operation_id: str, intended_state: LifecycleState, evidence: dict[str, Any] | None = None, *, source_task_key: str | None = None, target_task_key: str | None = None, event: str | None = None, fallback: dict[str, Any] | None = None) -> LifecycleState:
+    def observe_delivery_unknown(self, actor: str, operation_id: str, intended_state: LifecycleState, evidence: dict[str, Any] | None = None, *, source_task_key: str | None = None, target_task_key: str | None = None, event: str | None = None, fallback: dict[str, Any] | None = None, recipient_operation_ids: dict[str, str] | None = None) -> LifecycleState:
         if not self._valid_operation(operation_id):
             raise LifecycleTransitionError("lifecycle transitions require a UUID operation ID")
         if operation_id in self._operations:
             raise LifecycleTransitionError("operation ID cannot be overwritten while delivery is unknown")
-        if intended_state is LifecycleState.BLOCKED:
+        if intended_state in {LifecycleState.BLOCKED, LifecycleState.ESCALATED}:
             fallback = canonicalize_and_validate_fallback(fallback, operation_id, self.work_item)
             if fallback is None or fallback["repository"] != self.work_item.repository:
                 raise LifecycleTransitionError("BLOCKED unknown delivery requires the canonical work-item fallback")
@@ -702,7 +746,7 @@ class CoordinatorLifecycle:
         if event is None:
             raise LifecycleTransitionError("lifecycle event is required")
         self._require_peer_actor(actor, source_task_key)
-        intent = self._build_transition_intent(operation_id, intended_state, source_task_key, target_task_key, event, evidence, fallback)
+        intent = self._build_transition_intent(operation_id, intended_state, source_task_key, target_task_key, event, evidence, fallback, recipient_operation_ids)
         self._validate_transition_intent(intent, require_prerequisites=False)
         self._operations[operation_id] = intent
         self._unknown = operation_id

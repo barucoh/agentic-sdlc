@@ -20,6 +20,8 @@
     "lifecycle_event",
     "source_task_key",
     "target_task_key",
+    "recipient_task_keys",
+    "recipient_operation_ids",
     "readiness_evidence",
     "objective",
     "inputs",
@@ -79,11 +81,13 @@
     "is_correction": { "type": "boolean" },
     "lifecycle_state": {
       "type": "string",
-      "enum": ["IMPLEMENTATION_ACTIVE", "IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVE", "CHANGES_REQUESTED", "CORRECTION_ACTIVE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED", "DELIVERY_UNKNOWN"]
+      "enum": ["IMPLEMENTATION_ACTIVE", "IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVE", "CHANGES_REQUESTED", "CORRECTION_ACTIVE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED", "ESCALATED", "DELIVERY_UNKNOWN"]
     },
-    "lifecycle_event": { "type": "string", "enum": ["IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVATE", "CHANGES_REQUESTED", "CORRECTION_ACTIVATE", "REVIEW_ACCEPTED", "DELIVERY_CELL_COMPLETED", "HUMAN_MERGE_READY", "BLOCKED", "ESCALATION"] },
+    "lifecycle_event": { "type": "string", "enum": ["IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVATE", "CHANGES_REQUESTED", "CORRECTION_ACTIVATE", "REVIEW_ACCEPTED", "DELIVERY_CELL_COMPLETED", "HUMAN_MERGE_READY", "BLOCKED", "ESCALATED", "DELIVERY_UNKNOWN"] },
     "source_task_key": { "type": "string", "pattern": "^issue-[1-9][0-9]*-[a-z][a-z0-9-]*$" },
     "target_task_key": { "type": "string", "pattern": "^issue-[1-9][0-9]*-[a-z][a-z0-9-]*$" },
+    "recipient_task_keys": { "$ref": "#/$defs/stringList" },
+    "recipient_operation_ids": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }, "uniqueItems": true },
     "readiness_evidence": {
       "type": "object", "additionalProperties": false,
       "required": ["commit_sha", "pull_request_url", "local_gates", "ci_status", "required_checks"],
@@ -92,7 +96,8 @@
         "pull_request_url": { "type": ["string", "null"], "format": "uri" },
         "local_gates": { "type": "string", "enum": ["passed", "failed", "pending", "not_run"] },
         "ci_status": { "type": "string", "enum": ["passed", "failed", "pending", "not_run"] },
-        "required_checks": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["name", "status"], "properties": { "name": { "type": "string", "minLength": 1 }, "status": { "type": "string", "enum": ["passed", "failed", "pending", "not_run"] } } }, "uniqueItems": true }
+        "required_checks": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["name", "status"], "properties": { "name": { "type": "string", "minLength": 1 }, "status": { "type": "string", "enum": ["passed", "failed", "pending", "not_run"] } } }, "uniqueItems": true },
+        "implementation_status": { "type": "string", "enum": ["ready"] }, "qa_status": { "type": "string", "enum": ["pending", "passed", "changes_requested"] }, "review_status": { "type": "string", "enum": ["pending", "accepted", "changes_requested"] }, "implementation_evidence": { "type": "string", "minLength": 1 }, "qa_evidence": { "type": "string", "minLength": 1 }, "review_evidence": { "type": "string", "minLength": 1 }
       }
     },
     "blocked_fallback": { "type": ["object", "null"], "additionalProperties": false, "properties": {
