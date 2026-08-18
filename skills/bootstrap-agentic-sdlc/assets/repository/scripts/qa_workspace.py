@@ -72,7 +72,9 @@ def _status_paths(status: Iterable[str], declared_outputs: tuple[str, ...]) -> t
     kept: list[str] = []
     for line in status:
         path = line[3:].split(" -> ", 1)[-1] if len(line) >= 3 else line
-        if not _under_declared_output(path, declared_outputs):
+        # Declared outputs can hide only untracked artifacts. Any tracked
+        # working-tree/index entry remains visible and is always a violation.
+        if not line.startswith("??") or not _under_declared_output(path, declared_outputs):
             kept.append(line)
     return tuple(kept)
 
@@ -81,14 +83,28 @@ def capture_snapshot(workspace: str | Path, declared_outputs: Iterable[str] = ()
     root = Path(workspace)
     outputs = tuple(sorted(output.replace("\\", "/").strip("/.") for output in declared_outputs if output.strip("/.")))
     status = tuple(line for line in _git(root, "status", "--porcelain=v1").splitlines() if line)
-    diff_args = ["diff", "--binary", "--"]
-    diff_args.extend([".", *[f":(exclude){output}" for output in outputs]])
+    unstaged = _git(root, "diff", "--binary", "--")
+    staged = _git(root, "diff", "--cached", "--binary", "--")
     return WorkspaceSnapshot(
         head=_git(root, "rev-parse", "HEAD").strip(),
         branch=_branch(root),
         status=_status_paths(status, outputs),
-        source_diff=_git(root, *diff_args),
+        source_diff=unstaged + staged,
     )
+
+
+def _declared_output_errors(workspace: str | Path, declared_outputs: Iterable[str]) -> tuple[str, ...]:
+    root = Path(workspace)
+    tracked = {path.replace("\\", "/") for path in _git(root, "ls-files", "--cached").splitlines() if path}
+    errors: list[str] = []
+    for raw in declared_outputs:
+        output = raw.replace("\\", "/").strip("/.")
+        if not output:
+            errors.append("declared output must be a non-empty relative path")
+            continue
+        if any(path == output or path.startswith(output + "/") or output.startswith(path + "/") for path in tracked):
+            errors.append(f"declared output overlaps tracked file: {output}")
+    return tuple(errors)
 
 
 def verify_qa_workspace(
@@ -103,6 +119,7 @@ def verify_qa_workspace(
     exit_code: int | None = None,
     stdout: str = "",
     stderr: str = "",
+    declared_output_errors: Iterable[str] = (),
 ) -> WorkspaceVerification:
     outputs = tuple(sorted(output.replace("\\", "/").strip("/.") for output in declared_outputs if output.strip("/.")))
     errors: list[str] = []
@@ -112,20 +129,32 @@ def verify_qa_workspace(
         errors.append("QA workspace HEAD is not the exact expected implementation commit")
     if before.head != after.head:
         errors.append("QA workspace HEAD changed during behavioral verification")
-    if before.branch and before.branch == implementation_branch:
-        errors.append("QA workspace pre-snapshot must be detached or use a non-Implementation branch")
-    if after.branch and after.branch == implementation_branch:
-        errors.append("QA workspace must be detached or use a non-Implementation branch")
+    if before.branch:
+        errors.append("QA workspace pre-snapshot must be detached (no branch attached)")
+    if after.branch:
+        errors.append("QA workspace must remain detached (no branch attached)")
+    if before.branch != after.branch:
+        errors.append("QA workspace branch identity changed during behavioral verification")
     forbidden = {"source-edit", "source_mutation", "commit", "push"}
     bad_intents = sorted(set(intents) & forbidden)
     if bad_intents:
         errors.append("QA intent contains forbidden actions: " + ", ".join(bad_intents))
-    if before.status or before.source_diff:
+    before_tracked_status = tuple(line for line in before.status if not line.startswith("??"))
+    before_untracked_status = tuple(line for line in before.status if line.startswith("??"))
+    if before_tracked_status or before.source_diff:
         errors.append("QA workspace has pre-existing tracked source changes outside declared outputs")
+    if before_untracked_status:
+        errors.append("QA workspace has pre-existing undeclared untracked outputs")
     if before.status != after.status or before.source_diff != after.source_diff:
-        errors.append("QA changed source or committed content outside declared cache/build/test outputs")
+        if any(line.startswith("??") for line in after.status if line not in before.status):
+            errors.append("QA behavioral command created undeclared untracked outputs")
+        if before.source_diff != after.source_diff or any(
+            not line.startswith("??") for line in (*before.status, *after.status)
+        ):
+            errors.append("QA changed tracked source or committed content outside declared cache/build/test outputs")
     if exit_code is not None and exit_code != 0:
         errors.append(f"behavioral command failed with exit code {exit_code}")
+    errors.extend(declared_output_errors)
     return WorkspaceVerification(
         passed=not errors,
         errors=tuple(errors),
@@ -155,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     if not command:
         parser.error("a behavioral command is required after --")
     before = capture_snapshot(args.workspace, args.declared_output)
+    declaration_errors = _declared_output_errors(args.workspace, args.declared_output)
     preflight = verify_qa_workspace(
         before,
         before,
@@ -164,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         intents=args.intent,
         command=command,
         exit_code=0,
+        declared_output_errors=declaration_errors,
     )
     if not preflight.passed:
         print(json.dumps(asdict(preflight), indent=2))
@@ -181,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         exit_code=completed.returncode,
         stdout=completed.stdout,
         stderr=completed.stderr,
+        declared_output_errors=declaration_errors,
     )
     print(json.dumps(asdict(result), indent=2))
     return 0 if result.passed else 2
