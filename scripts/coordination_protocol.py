@@ -12,7 +12,7 @@ from uuid import NAMESPACE_URL, uuid5
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 
@@ -93,6 +93,7 @@ LIFECYCLE_CONFIG_LINES = (
     "lifecycle_policy: delivery-cell-v1",
     'lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"',
     "lifecycle_transport_overlay: per-recipient DELIVERY_UNKNOWN",
+    "delivery_topology: one-issue-one-cell-one-implementation-worktree-branch-one-pr",
 )
 
 
@@ -186,7 +187,10 @@ def validate_routing(value: dict[str, Any]) -> list[str]:
             errors.append(f"{target_role} cannot route to target model {model!r}")
         elif effort not in allowed_models[model]:
             errors.append(f"{target_role} cannot use effort {effort!r} with {model}")
-        expected_sandbox = "workspace-write" if target_role in {"implementation", "knowledge_steward"} else "read-only"
+        # QA receives an isolated disposable workspace-write task so behavioral
+        # tools may create caches/build outputs without touching implementation
+        # source, history, or the implementation branch.
+        expected_sandbox = "workspace-write" if target_role in {"implementation", "qa", "knowledge_steward"} else "read-only"
         if sandbox != expected_sandbox:
             errors.append(f"durable {target_role} handoff must use sandbox_mode={expected_sandbox!r}")
     else:
@@ -1162,3 +1166,37 @@ def validate_handoff(value: Any, schema: dict[str, Any] | None = None) -> list[s
     if compatibility_errors or schema_errors or not isinstance(value, dict):
         return compatibility_errors or schema_errors
     return validate_routing(value) + validate_lifecycle_handoff(value)
+
+
+def pre_dispatch_handoff(
+    value: Any,
+    dispatch: Callable[[dict[str, Any]], Any],
+    *,
+    action: str,
+) -> Any:
+    """Validate the complete envelope before an issue-backed side effect.
+
+    Task creation and cross-task sends share this seam.  The callback is never
+    invoked when schema, routing, or lifecycle validation fails, which keeps
+    transport adapters from becoming a second handoff authority.
+    """
+
+    errors = validate_handoff(value)
+    if errors:
+        detail = "; ".join(errors[:4])
+        if len(errors) > 4:
+            detail += f"; and {len(errors) - 4} more"
+        raise LifecycleTransitionError(f"{action} blocked by invalid handoff: {detail}")
+    return dispatch(value)
+
+
+def dispatch_issue_task(value: Any, create_task: Callable[[dict[str, Any]], Any]) -> Any:
+    """Canonical pre-dispatch path for creating a durable role task."""
+
+    return pre_dispatch_handoff(value, create_task, action="issue-backed task creation")
+
+
+def send_cross_task_handoff(value: Any, send: Callable[[dict[str, Any]], Any]) -> Any:
+    """Canonical pre-dispatch path for a required peer handoff/wake-up."""
+
+    return pre_dispatch_handoff(value, send, action="cross-task send")

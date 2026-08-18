@@ -33,6 +33,8 @@ from coordination_protocol import (  # noqa: E402
     validate_handoff,
     validate_routing,
     validate_session_title_config,
+    dispatch_issue_task,
+    send_cross_task_handoff,
 )
 import manage_repository  # noqa: E402
 
@@ -79,8 +81,13 @@ class RoleContractTests(unittest.TestCase):
         self.assertIn("never as an ephemeral subagent", implementation["developer_instructions"])
         for role in ("qa", "reviewer"):
             value = tomllib.loads((self.roles / f"{role}.toml").read_text(encoding="utf-8"))
-            self.assertEqual(value["sandbox_mode"], "read-only")
+            expected_mode = "workspace-write" if role == "qa" else "read-only"
+            self.assertEqual(value["sandbox_mode"], expected_mode)
             self.assertIn("independent", value["description"].lower())
+            if role == "qa":
+                contract = value["developer_instructions"].lower()
+                for phrase in ("disposable", "isolated", "no source", "no commit", "no push", "cleanup"):
+                    self.assertIn(phrase, contract)
 
     def test_adr_selection_stays_centralized(self) -> None:
         skill = (ROOT / "skills/adr-context/SKILL.md").read_text(encoding="utf-8")
@@ -213,7 +220,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             "product": ("gpt-5.6-sol", "Medium", "read-only"),
             "architecture": ("gpt-5.6-sol", "Medium", "read-only"),
             "implementation": ("gpt-5.6-luna", "Low", "workspace-write"),
-            "qa": ("gpt-5.6-sol", "Medium", "read-only"),
+            "qa": ("gpt-5.6-sol", "Medium", "workspace-write"),
             "reviewer": ("gpt-5.6-sol", "Medium", "read-only"),
             "knowledge_steward": ("gpt-5.6-luna", "Low", "workspace-write"),
         }
@@ -228,6 +235,39 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 self.assertEqual(validate_routing(value), [])
                 cases += 1
         self.assertEqual(cases, 7)
+
+    def test_pre_dispatch_validation_blocks_task_creation_and_send_before_side_effects(self) -> None:
+        invalid = self.handoff()
+        invalid["objective"] = ""
+        calls: list[str] = []
+        with self.assertRaisesRegex(LifecycleTransitionError, "issue-backed task creation blocked"):
+            dispatch_issue_task(invalid, lambda _: calls.append("create"))
+        with self.assertRaisesRegex(LifecycleTransitionError, "cross-task send blocked"):
+            send_cross_task_handoff(invalid, lambda _: calls.append("send"))
+        self.assertEqual(calls, [])
+
+        valid = self.handoff()
+        self.assertEqual(dispatch_issue_task(valid, lambda envelope: (calls.append("create"), envelope)[1]), valid)
+        self.assertEqual(send_cross_task_handoff(valid, lambda envelope: (calls.append("send"), envelope)[1]), valid)
+        self.assertEqual(calls, ["create", "send"])
+
+    def test_handoff_validator_cli_uses_the_same_authority(self) -> None:
+        valid = self.handoff()
+        command = [sys.executable, str(ROOT / "scripts/validate_handoff.py")]
+        accepted = subprocess.run(command, input=json.dumps(valid), text=True, capture_output=True, check=False)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIn("valid handoff", accepted.stdout)
+        invalid = copy.deepcopy(valid)
+        invalid["objective"] = ""
+        rejected = subprocess.run(command, input=json.dumps(invalid), text=True, capture_output=True, check=False)
+        self.assertEqual(rejected.returncode, 2)
+        self.assertIn("objective", rejected.stdout)
+
+    def test_qa_workspace_is_disposable_and_source_immutable(self) -> None:
+        contract = tomllib.loads((ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.codex/agents/qa.toml").read_text(encoding="utf-8"))["developer_instructions"].lower()
+        self.assertIn("isolated disposable qa worktree", contract)
+        self.assertIn("behavioral tools may create caches/build/test outputs", contract)
+        self.assertIn("source mutation", contract)
 
     def test_cycle4_direction_identity_and_typed_intent_guards(self) -> None:
         lifecycle = self.lifecycle()
@@ -433,6 +473,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             "recipient_task_keys": ["issue-1-coordinator"],
             "recipient_operation_ids": ["00000000-0000-4000-8000-000000000003"],
             "terminal_state": "completed",
+            "sandbox_mode": "read-only",
         })
         self.assertEqual(validate_handoff(terminal), [])
         for name, mutation in {
@@ -536,7 +577,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 "target_task_key": "issue-1-qa",
                 "target_model": "gpt-5.6-sol",
                 "effort": "Medium",
-                "sandbox_mode": "read-only",
+                "sandbox_mode": "workspace-write",
                 "evidence": ["local gates passed", "CI passed"],
                 "readiness_evidence": {"commit_sha": "c" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}], "implementation_evidence": {"role": "implementation", "commit_sha": "c" * 40, "pull_request_url": "https://github.com/o/r/pull/6", "local_gates": "passed", "ci_status": "passed", "required_checks": [{"name": "validate", "status": "passed"}]}},
                 "work_item": {

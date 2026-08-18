@@ -16,7 +16,7 @@
   "effort": "Medium",
   "rationale": "This is an independent quality verification task with straightforward evidence.",
   "execution_mode": "durable",
-  "sandbox_mode": "read-only",
+  "sandbox_mode": "workspace-write",
   "is_correction": false,
   "lifecycle_state": "IMPLEMENTATION_READY",
   "lifecycle_event": "IMPLEMENTATION_READY",

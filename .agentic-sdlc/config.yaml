@@ -25,6 +25,7 @@ routing_matrix:
 lifecycle_policy: delivery-cell-v1
 lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"
 lifecycle_transport_overlay: per-recipient DELIVERY_UNKNOWN
+delivery_topology: one-issue-one-cell-one-implementation-worktree-branch-one-pr
 bootstrap_exception: false
 handoff_schema_version: 1.0.0
 handoff_schema_path: .agentic-sdlc/handoff.schema.json

@@ -9,7 +9,7 @@ The executable contracts are the standalone files in `.codex/agents/`. Each decl
 | Product | PD | User value, behavior, acceptance criteria | Read-only | Does not decide architecture or approve delivery |
 | Architecture | AR | Boundaries and architecture constraints | Read-only | Uses `adr-context`; does not implement or override ADRs |
 | Implementation | IM | Scoped changes and corrections | Workspace-write in its issue worktree | Never approves or merges its own work |
-| QA | QA | Independent behavioral verification | Read-only against implementation | Does not modify implementation or review-approve |
+| QA | QA | Independent behavioral verification | Isolated disposable workspace-write worktree | May create test outputs, but does not modify source, commit, push, or review-approve |
 | Reviewer | RV | Independent correctness and risk review | Read-only against implementation | Does not modify, self-review, or merge |
 | Knowledge Steward | KS | Canonical documentation and ADR hygiene | Workspace-write in its issue worktree | Preserves Product/Architecture decision authority |
 

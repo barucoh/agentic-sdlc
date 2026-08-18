@@ -1,20 +1,20 @@
 {
   "files": {
-    ".agentic-sdlc/config.yaml": "b656c59cedead6bf47fdb032b6180f2ae4a03af84e586ed030677de944920798",
-    ".agentic-sdlc/handoff-template.json": "43317362451ae116c629405232d7a2542f8a0c8ea075211b3a59202a089f52dc",
+    ".agentic-sdlc/config.yaml": "cfa62591fde983e3cf33a4332ca9115272e74c3759ebe0d50552c6d55ca28579",
+    ".agentic-sdlc/handoff-template.json": "b9cabe38ab5b68d4c17c4a3afb497962e90da84d3e9c6fad53d51f84ded2c9f7",
     ".agentic-sdlc/handoff.schema.json": "7b42f0f7486b8a4216bfa12e56fc8c1cbd7bbd2364a25bc3d527ae633b3a272f",
     ".codex/agents/architecture.toml": "5032b67f3d3aad6de677b09cb1fa5248aed410ff3423c2127dea348789de31ee",
-    ".codex/agents/coordinator.toml": "c4357c4888b3d8cf11b0e06c53e8f204a1c13fd276fe0509acb5291c40f6391b",
+    ".codex/agents/coordinator.toml": "de23a04b483ceae4ec2c0f1df8e078f6fe5481132a449710f73db11162f12296",
     ".codex/agents/implementation.toml": "1afe55dc673f507474e9e131aa295ad586eb6448cdc1ac113626217f1fa3298b",
     ".codex/agents/knowledge_steward.toml": "5baa394c58a6e3042422c99c7b87e61791dbe1bf4a76a270219f45178605b412",
     ".codex/agents/product.toml": "67bf6547ef110c070ce5d010ad85470fd03320049a5f5447f3bf6b67e5acb0f7",
-    ".codex/agents/qa.toml": "9cd2bfdd0277503123980ffcc86188686ce51aee729bd396d966f602d6a4b1b6",
+    ".codex/agents/qa.toml": "839d10820d0efbcefcc2c2fbdf0ecf208d64ac08cfa674768b855b95a5037f19",
     ".codex/agents/reviewer.toml": "a7783a345ab4a82399f10748aee80b6def47905c3737a92f8643f86cbd320670",
-    "docs/agentic-sdlc/coordination.md": "debfeb501a1bc7099a62a8cb213193fe433d39d078e3b33326a184d9c85c2307",
-    "docs/agentic-sdlc/role-contracts.md": "1aa57b366fe1a99e5b0b25234a9f49a4a3e104d1119e863325f741e14aaedc98"
+    "docs/agentic-sdlc/coordination.md": "8e926fa9bdfac43aa7ef68febfa12cbb900554f6f083202e2e324dcac5cb57bb",
+    "docs/agentic-sdlc/role-contracts.md": "5796c52b7fc0278b2d5d5e37e77ebb793fd7c5c8755533671987503cd1260318"
   },
   "managed_blocks": {
-    "AGENTS.md": "5f301a95cf9de51e8bdebb6623e6f5f17369730cca6e587d49b5baea5c37fc52"
+    "AGENTS.md": "de7116021d068c10dee8053fadb73dccd99f8eddce3818da74cd9745fde0e22e"
   },
   "plugin_version": "0.3.0",
   "project_name": "Agentic SDLC",

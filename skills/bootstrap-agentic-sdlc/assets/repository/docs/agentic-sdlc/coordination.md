@@ -3,7 +3,9 @@
 
 ## Durable authority and delivery cell
 
-GitHub issues, pull requests, commits, checks, review comments, ADRs, and committed canonical documentation are authoritative. Native task messages are wake-up optimizations only; machine-local task handles are never committed. Every file-producing, durable-artifact-producing, decision-heavy, release, high-importance, or risk-bearing action uses its own issue-backed, user-visible task, worktree, branch, and PR. Ephemeral subagents are bounded read-only research only.
+GitHub issues, pull requests, commits, checks, review comments, ADRs, and committed canonical documentation are authoritative. Native task messages are wake-up optimizations only; machine-local task handles are never committed. Canonical topology is one issue = one delivery cell = one writable Implementation worktree/branch = one PR. The cell has distinct issue-backed user-visible Coordinator, Implementation, QA, and Reviewer tasks; only Implementation writes source or commits, while QA and Reviewer remain independent and non-authoritative. Ephemeral subagents are bounded read-only research only.
+
+file-producing, durable-artifact-producing, decision-heavy, release, high-importance, and risk-bearing work stays inside this issue-scoped delivery cell; it does not create a second PR for the same issue.
 
 Coordinator establishes authoritative issue scope, creates or binds the dedicated Implementation, QA, and Reviewer tasks, provides their local handles, and supervises the delivery cell. Coordinator watches, reconciles GitHub, and handles `BLOCKED`, escalation, or `DELIVERY_UNKNOWN`; it is not the routine message relay or specialist decision owner.
 
@@ -69,3 +71,7 @@ Official references: [Hooks](https://learn.chatgpt.com/docs/hooks), [Codex SDK](
 Name every new user-visible task `#<issue number> <role code> - <issue title>` using `CO`, `PD`, `AR`, `IM`, `QA`, `RV`, or `KS`; reject unknown codes. The maximum full title is 36 Unicode characters; truncate only the issue-title segment and end it with one `…`.
 
 Every durable handoff carries explicit target model, effort, and one-sentence rationale. Coordinator/Product/Architecture use Sol/Medium by default, routine Implementation and Knowledge Steward use Luna/Low, QA/Reviewer use Sol/Medium, and corrections return to the same Implementation task using Luna or Terra. Handoff terminal states are `completed`, `changes_requested`, and `blocked`; transport may additionally report `DELIVERY_UNKNOWN`.
+
+Before every issue-backed task creation and every required cross-task send, the Coordinator calls the repository-native `dispatch_issue_task` or `send_cross_task_handoff` helper from `scripts/coordination_protocol.py`. Each helper validates the complete versioned envelope with `validate_handoff` and returns actionable errors without invoking the transport callback when invalid. This is the sole pre-dispatch authority; native task messaging remains transport only.
+
+QA verification uses an isolated disposable workspace-write worktree derived from the exact implementation commit. Behavioral tools may create caches/build/test outputs, but QA must not mutate source, commit, push, or alter the Implementation worktree/branch. QA records source status and diff before and after, cleans up the disposable worktree, and reports blocked on drift.
