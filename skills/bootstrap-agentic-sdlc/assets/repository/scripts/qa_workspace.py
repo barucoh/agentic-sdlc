@@ -41,6 +41,23 @@ def _git(workspace: Path, *args: str) -> str:
     return result.stdout
 
 
+def _branch(workspace: Path) -> str:
+    result = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        cwd=workspace,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    # A detached exact-head QA worktree is the preferred identity; symbolic-ref
+    # returns status 1 for that expected condition.
+    if result.returncode == 1:
+        return ""
+    if result.returncode:
+        raise QAWorkspaceError(result.stderr.strip() or "unable to inspect QA branch identity")
+    return result.stdout.strip()
+
+
 def _under_declared_output(path: str, declared_outputs: tuple[str, ...]) -> bool:
     normalized = path.replace("\\", "/").lstrip("./")
     return any(normalized == output or normalized.startswith(output + "/") for output in declared_outputs)
@@ -63,7 +80,7 @@ def capture_snapshot(workspace: str | Path, declared_outputs: Iterable[str] = ()
     diff_args.extend([".", *[f":(exclude){output}" for output in outputs]])
     return WorkspaceSnapshot(
         head=_git(root, "rev-parse", "HEAD").strip(),
-        branch=_git(root, "symbolic-ref", "--quiet", "--short", "HEAD").strip(),
+        branch=_branch(root),
         status=_status_paths(status, outputs),
         source_diff=_git(root, *diff_args),
     )
