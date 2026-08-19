@@ -8,7 +8,7 @@
     ".codex/agents/implementation.toml": "1afe55dc673f507474e9e131aa295ad586eb6448cdc1ac113626217f1fa3298b",
     ".codex/agents/knowledge_steward.toml": "5baa394c58a6e3042422c99c7b87e61791dbe1bf4a76a270219f45178605b412",
     ".codex/agents/product.toml": "67bf6547ef110c070ce5d010ad85470fd03320049a5f5447f3bf6b67e5acb0f7",
-    ".codex/agents/qa.toml": "b4dac1958c3dc24788f4c15adb1f0f97988ba545959f7037258b36370c54e4c6",
+    ".codex/agents/qa.toml": "b8aa02c23583de7cda4a813f8f251b2d0fb57cea4e6729dc5341098b56d58290",
     ".codex/agents/reviewer.toml": "a7783a345ab4a82399f10748aee80b6def47905c3737a92f8643f86cbd320670",
     "docs/agentic-sdlc/coordination.md": "c1073407adfbe0d779fb086d80174d4366d9e5b9751e991d5daad94c53361a9c",
     "docs/agentic-sdlc/hooks.md": "2ad972ceadc384b263cd74d8eecad1d86d8cafe8d53bd105e3fa20e0f98f602c",
