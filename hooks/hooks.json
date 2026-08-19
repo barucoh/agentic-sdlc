@@ -1,5 +1,4 @@
 {
-  "description": "Validate Agentic SDLC handoffs before native visible-task creation or cross-task delivery.",
   "hooks": {
     "PreToolUse": [
       {

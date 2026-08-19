@@ -31,6 +31,8 @@ def run_guard(payload: dict) -> subprocess.CompletedProcess[str]:
 def main() -> int:
     try:
         hooks = json.loads(HOOKS_PATH.read_text(encoding="utf-8"))
+        if set(hooks) != {"hooks"}:
+            raise ValueError("hooks/hooks.json must contain only the Codex-supported top-level hooks field")
         group = hooks["hooks"]["PreToolUse"][0]
         handler = group["hooks"][0]
     except (KeyError, IndexError, json.JSONDecodeError) as exc:

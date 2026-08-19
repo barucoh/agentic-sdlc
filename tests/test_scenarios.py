@@ -266,6 +266,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
 
     def test_native_task_hook_uses_canonical_validator_and_observed_tool_names(self) -> None:
         hook_config = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(hook_config), {"hooks"}, "Codex 0.142.0 rejects unsupported hook manifest metadata")
         group = hook_config["hooks"]["PreToolUse"][0]
         self.assertIn("codex_app__create_thread", group["matcher"])
         self.assertIn("codex_app__send_message_to_thread", group["matcher"])
