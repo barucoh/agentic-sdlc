@@ -99,6 +99,8 @@ LIFECYCLE_CONFIG_LINES = (
     'lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"',
     "lifecycle_transport_overlay: per-recipient DELIVERY_UNKNOWN",
     "delivery_topology: one-issue-one-cell-one-implementation-worktree-branch-one-pr",
+    "qa_workspace_topology: host-provisioned-isolated-clone",
+    "qa_workspace_check: scripts/qa_workspace.py",
 )
 
 

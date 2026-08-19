@@ -57,6 +57,10 @@ required_files = [
     ROOT / "scripts/coordination_protocol.py",
     ROOT / "scripts/validate_handoff.py",
     ROOT / "scripts/qa_workspace.py",
+    ROOT / "hooks/hooks.json",
+    ROOT / "hooks/pretool_handoff_guard.py",
+    ROOT / "scripts/validate_hooks.py",
+    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/docs/agentic-sdlc/hooks.md",
 ]
 for path in required_files:
     if not path.is_file():
@@ -156,6 +160,16 @@ try:
         errors.append("handoff terminal states must be completed, changes_requested, and blocked")
 except Exception as exc:
     errors.append(f"invalid handoff schema/template: {exc}")
+
+hook_validation = subprocess.run(
+    [sys.executable, str(ROOT / "scripts" / "validate_hooks.py")],
+    cwd=ROOT,
+    text=True,
+    capture_output=True,
+    check=False,
+)
+if hook_validation.returncode:
+    errors.append("native task-boundary hook validation failed: " + hook_validation.stderr.strip())
 
 try:
     state_actions, _, _ = manage_repository.plan(ROOT, "Agentic SDLC")

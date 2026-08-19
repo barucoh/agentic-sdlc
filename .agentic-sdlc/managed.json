@@ -1,6 +1,6 @@
 {
   "files": {
-    ".agentic-sdlc/config.yaml": "cfa62591fde983e3cf33a4332ca9115272e74c3759ebe0d50552c6d55ca28579",
+    ".agentic-sdlc/config.yaml": "3ccd576c4266f341a20a19129aaab346c85fb5ad8cfc10ae508db06e06f767b9",
     ".agentic-sdlc/handoff-template.json": "b9cabe38ab5b68d4c17c4a3afb497962e90da84d3e9c6fad53d51f84ded2c9f7",
     ".agentic-sdlc/handoff.schema.json": "7b42f0f7486b8a4216bfa12e56fc8c1cbd7bbd2364a25bc3d527ae633b3a272f",
     ".codex/agents/architecture.toml": "5032b67f3d3aad6de677b09cb1fa5248aed410ff3423c2127dea348789de31ee",
@@ -8,12 +8,13 @@
     ".codex/agents/implementation.toml": "1afe55dc673f507474e9e131aa295ad586eb6448cdc1ac113626217f1fa3298b",
     ".codex/agents/knowledge_steward.toml": "5baa394c58a6e3042422c99c7b87e61791dbe1bf4a76a270219f45178605b412",
     ".codex/agents/product.toml": "67bf6547ef110c070ce5d010ad85470fd03320049a5f5447f3bf6b67e5acb0f7",
-    ".codex/agents/qa.toml": "1a34d9281d21ea626b347a367a65497e8ae367ad24a1d3e0c7bc9acd53e610c3",
+    ".codex/agents/qa.toml": "b4dac1958c3dc24788f4c15adb1f0f97988ba545959f7037258b36370c54e4c6",
     ".codex/agents/reviewer.toml": "a7783a345ab4a82399f10748aee80b6def47905c3737a92f8643f86cbd320670",
-    "docs/agentic-sdlc/coordination.md": "0f9db2a86e1fd62e1bfe4a43f901d9a0c1574d1d38ce58cd9990dcd9ced6b64d",
-    "docs/agentic-sdlc/role-contracts.md": "5796c52b7fc0278b2d5d5e37e77ebb793fd7c5c8755533671987503cd1260318",
-    "scripts/coordination_protocol.py": "ba1b223b6aff88321d6a0067cebf9700a6cd871d03734b384aa78978a1ce6c4c",
-    "scripts/qa_workspace.py": "1b16310790d1daf337610926cf18b982cfa9fdeed054f043c23582e529c9dde1",
+    "docs/agentic-sdlc/coordination.md": "c1073407adfbe0d779fb086d80174d4366d9e5b9751e991d5daad94c53361a9c",
+    "docs/agentic-sdlc/hooks.md": "2ad972ceadc384b263cd74d8eecad1d86d8cafe8d53bd105e3fa20e0f98f602c",
+    "docs/agentic-sdlc/role-contracts.md": "e0e6eb1ead294df75940140f24c65852f9f86e1cfbd4fcb4f742a98ec3457045",
+    "scripts/coordination_protocol.py": "154739e7644b9c5d295643f9b2744c7aa2686d6eda62331c102933517b5ef957",
+    "scripts/qa_workspace.py": "d4b1f30bff1b54e73c2aafdc688b192c9604bbc86cff88d14fa784984e754f43",
     "scripts/validate_handoff.py": "ddacb868ff6f6891c0bb0bbc33a94114120ce23a22c7f80134d7bc7cc3bda2a9"
   },
   "managed_blocks": {

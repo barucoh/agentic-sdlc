@@ -19,6 +19,8 @@ Clone the repository as `plugins/agentic-sdlc` beneath a marketplace root. Add `
 
 For a non-default marketplace, run `codex plugin marketplace add <marketplace-root>`, then `codex plugin add agentic-sdlc@agentic-sdlc-local`. Start a new session after installation.
 
+Agentic SDLC bundles a synchronous native task-boundary hook at `hooks/hooks.json`. After install or upgrade, inspect and trust the exact hook hash through `/hooks`; Codex skips changed plugin hooks until reviewed. See [native task-boundary hooks](agentic-sdlc/hooks.md) for covered tools and verification.
+
 ## Version-pinned Git source
 
 A team marketplace can point at a stable tag instead of a local checkout:

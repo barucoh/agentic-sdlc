@@ -19,7 +19,7 @@ Bootstrap and upgrade always inspect first, report a deterministic dry run, pres
 
 See [upgrading](docs/upgrading.md) for the two-layer plugin and repository migration model.
 
-See the managed [coordination policy](docs/agentic-sdlc/coordination.md) and [role contracts](docs/agentic-sdlc/role-contracts.md) for the native delivery-cell model: Coordinator supervises a dedicated Implementation, QA, and Reviewer cell while GitHub remains the durable authority.
+See the managed [coordination policy](docs/agentic-sdlc/coordination.md), [role contracts](docs/agentic-sdlc/role-contracts.md), and [native task-boundary hook guardrails](docs/agentic-sdlc/hooks.md) for the native delivery-cell model: Coordinator supervises a dedicated Implementation, QA, and Reviewer cell while GitHub remains the durable authority.
 
 ## Development
 

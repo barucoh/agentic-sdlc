@@ -1,5 +1,5 @@
 # agentic-sdlc:managed runtime/v1
-"""Repository-native checks for an isolated QA verification worktree."""
+"""Repository-native checks for an isolated QA verification clone."""
 
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ class WorkspaceSnapshot:
     status: tuple[str, ...]
     source_diff: str
     branch_refs: tuple[tuple[str, str], ...] = ()
+    implementation_ref: tuple[str, str] = ()
+    git_common_dir: str = ""
 
 
 @dataclass(frozen=True)
@@ -55,7 +57,7 @@ def _branch(workspace: Path) -> str:
         capture_output=True,
         check=False,
     )
-    # A detached exact-head QA worktree is the preferred identity; symbolic-ref
+    # A detached exact-head QA clone is the preferred identity; symbolic-ref
     # returns status 1 for that expected condition.
     if result.returncode == 1:
         return ""
@@ -71,6 +73,27 @@ def _branch_refs(workspace: Path) -> tuple[tuple[str, str], ...]:
         ref, object_id = line.split(" ", 1)
         pairs.append((ref, object_id))
     return tuple(sorted(pairs))
+
+
+def _git_common_dir(workspace: Path) -> str:
+    common_dir = Path(_git(workspace, "rev-parse", "--git-common-dir").strip())
+    if not common_dir.is_absolute():
+        common_dir = workspace / common_dir
+    return str(common_dir.resolve())
+
+
+def _implementation_ref(workspace: Path, branch: str) -> tuple[str, str]:
+    ref_name = f"refs/heads/{branch}"
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{ref_name}^{{commit}}"],
+        cwd=workspace,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode:
+        return ()
+    return (ref_name, result.stdout.strip())
 
 
 def _under_declared_output(path: str, declared_outputs: tuple[str, ...]) -> bool:
@@ -89,7 +112,12 @@ def _status_paths(status: Iterable[str], declared_outputs: tuple[str, ...]) -> t
     return tuple(kept)
 
 
-def capture_snapshot(workspace: str | Path, declared_outputs: Iterable[str] = ()) -> WorkspaceSnapshot:
+def capture_snapshot(
+    workspace: str | Path,
+    declared_outputs: Iterable[str] = (),
+    *,
+    implementation_branch: str = "",
+) -> WorkspaceSnapshot:
     root = Path(workspace)
     outputs = tuple(sorted(output.replace("\\", "/").strip("/.") for output in declared_outputs if output.strip("/.")))
     status = tuple(line for line in _git(root, "status", "--porcelain=v1").splitlines() if line)
@@ -101,6 +129,8 @@ def capture_snapshot(workspace: str | Path, declared_outputs: Iterable[str] = ()
         status=_status_paths(status, outputs),
         source_diff=unstaged + staged,
         branch_refs=_branch_refs(root),
+        implementation_ref=_implementation_ref(root, implementation_branch) if implementation_branch else (),
+        git_common_dir=_git_common_dir(root),
     )
 
 
@@ -131,6 +161,7 @@ def verify_qa_workspace(
     stdout: str = "",
     stderr: str = "",
     declared_output_errors: Iterable[str] = (),
+    implementation_repository_common_dir: str = "",
 ) -> WorkspaceVerification:
     outputs = tuple(sorted(output.replace("\\", "/").strip("/.") for output in declared_outputs if output.strip("/.")))
     errors: list[str] = []
@@ -148,6 +179,15 @@ def verify_qa_workspace(
         errors.append("QA workspace branch identity changed during behavioral verification")
     if before.branch_refs != after.branch_refs:
         errors.append("QA local refs/heads map changed during behavioral verification")
+    expected_ref = (f"refs/heads/{implementation_branch}", expected_sha)
+    if before.implementation_ref != expected_ref:
+        errors.append("QA pre-snapshot implementation ref is missing, wrong, or not at the exact expected commit")
+    if after.implementation_ref != expected_ref:
+        errors.append("QA implementation ref changed, is missing, or is not at the exact expected commit")
+    if before.git_common_dir != after.git_common_dir:
+        errors.append("QA git common directory changed during behavioral verification")
+    if not before.git_common_dir or before.git_common_dir == implementation_repository_common_dir:
+        errors.append("QA workspace must use an isolated clone with a distinct git common directory")
     forbidden = {"source-edit", "source_mutation", "commit", "push"}
     bad_intents = sorted(set(intents) & forbidden)
     if bad_intents:
@@ -171,7 +211,7 @@ def verify_qa_workspace(
     return WorkspaceVerification(
         passed=not errors,
         errors=tuple(errors),
-        cleanup_responsibility="Codex host/task-control provisions and removes the disposable worktree; this repository check verifies identity and drift but does not provision or delete it.",
+        cleanup_responsibility="Codex host/task-control provisions and removes the isolated disposable clone; this repository check verifies identity and drift but does not provision or delete it.",
         before=before,
         after=after,
         command=tuple(command),
@@ -182,10 +222,11 @@ def verify_qa_workspace(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Verify an isolated QA worktree")
+    parser = argparse.ArgumentParser(description="Verify an isolated QA clone")
     parser.add_argument("workspace")
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--implementation-branch", required=True)
+    parser.add_argument("--implementation-repository", required=True)
     parser.add_argument("--declared-output", action="append", default=[])
     parser.add_argument("--intent", action="append", default=[])
     raw = list(argv if argv is not None else sys.argv[1:])
@@ -196,7 +237,10 @@ def main(argv: list[str] | None = None) -> int:
     command = raw[delimiter + 1 :]
     if not command:
         parser.error("a behavioral command is required after --")
-    before = capture_snapshot(args.workspace, args.declared_output)
+    implementation_common_dir = _git_common_dir(Path(args.implementation_repository))
+    before = capture_snapshot(
+        args.workspace, args.declared_output, implementation_branch=args.implementation_branch
+    )
     declaration_errors = _declared_output_errors(args.workspace, args.declared_output)
     preflight = verify_qa_workspace(
         before,
@@ -208,12 +252,15 @@ def main(argv: list[str] | None = None) -> int:
         command=command,
         exit_code=0,
         declared_output_errors=declaration_errors,
+        implementation_repository_common_dir=implementation_common_dir,
     )
     if not preflight.passed:
         print(json.dumps(asdict(preflight), indent=2))
         return 2
     completed = subprocess.run(command, cwd=args.workspace, text=True, capture_output=True, check=False, shell=False)
-    after = capture_snapshot(args.workspace, args.declared_output)
+    after = capture_snapshot(
+        args.workspace, args.declared_output, implementation_branch=args.implementation_branch
+    )
     result = verify_qa_workspace(
         before,
         after,
@@ -226,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
         stdout=completed.stdout,
         stderr=completed.stderr,
         declared_output_errors=declaration_errors,
+        implementation_repository_common_dir=implementation_common_dir,
     )
     print(json.dumps(asdict(result), indent=2))
     return 0 if result.passed else 2

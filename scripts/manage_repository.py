@@ -46,6 +46,7 @@ MANAGED_PATHS = tuple(
         "scripts/validate_handoff.py",
         "scripts/qa_workspace.py",
         "docs/agentic-sdlc/coordination.md",
+        "docs/agentic-sdlc/hooks.md",
         "docs/agentic-sdlc/role-contracts.md",
     )
 )

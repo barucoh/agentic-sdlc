@@ -264,21 +264,44 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertEqual(rejected.returncode, 2)
         self.assertIn("objective", rejected.stdout)
 
+    def test_native_task_hook_uses_canonical_validator_and_observed_tool_names(self) -> None:
+        hook_config = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))
+        group = hook_config["hooks"]["PreToolUse"][0]
+        self.assertIn("codex_app__create_thread", group["matcher"])
+        self.assertIn("codex_app__send_message_to_thread", group["matcher"])
+        self.assertNotIn("hooks", json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8")))
+        guard = ROOT / "hooks/pretool_handoff_guard.py"
+        environment = {**__import__("os").environ, "PLUGIN_ROOT": str(ROOT)}
+        valid_event = {"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(self.handoff())}}
+        allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(valid_event), text=True, capture_output=True, env=environment, check=False)
+        self.assertEqual(allowed.returncode, 0)
+        self.assertEqual(allowed.stdout.strip(), "")
+        invalid = self.handoff()
+        invalid["objective"] = ""
+        denied = subprocess.run([sys.executable, str(guard)], input=json.dumps({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"metadata": {"handoff": invalid}}}), text=True, capture_output=True, env=environment, check=False)
+        self.assertEqual(denied.returncode, 0)
+        decision = json.loads(denied.stdout)["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "deny")
+        self.assertIn("ASDLC_HANDOFF_INVALID", decision["permissionDecisionReason"])
+        self.assertIn("no task/message was created", decision["permissionDecisionReason"])
+        self.assertEqual(subprocess.run([sys.executable, str(ROOT / "scripts/validate_hooks.py")], text=True, capture_output=True, check=False).returncode, 0)
+
     def test_qa_workspace_is_disposable_and_source_immutable(self) -> None:
         contract = tomllib.loads((ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.codex/agents/qa.toml").read_text(encoding="utf-8"))["developer_instructions"].lower()
-        self.assertIn("isolated disposable qa worktree", contract)
+        self.assertIn("isolated disposable qa clone", contract)
         self.assertIn("behavioral tools may create caches/build/test outputs", contract)
         self.assertIn("source mutation", contract)
 
     def test_qa_workspace_check_binds_exact_head_and_rejects_source_intent(self) -> None:
-        before = WorkspaceSnapshot(head="a" * 40, branch="", status=(), source_diff="")
-        after = WorkspaceSnapshot(head="a" * 40, branch="", status=(), source_diff="")
+        before = WorkspaceSnapshot(head="a" * 40, branch="", status=(), source_diff="", implementation_ref=("refs/heads/main", "a" * 40), git_common_dir="qa-common")
+        after = WorkspaceSnapshot(head="a" * 40, branch="", status=(), source_diff="", implementation_ref=("refs/heads/main", "a" * 40), git_common_dir="qa-common")
         valid = verify_qa_workspace(
             before,
             after,
             expected_sha=after.head,
-            implementation_branch="some-other-implementation-branch",
+            implementation_branch="main",
             declared_outputs=[".pytest_cache", "build", "dist"],
+            implementation_repository_common_dir="implementation-common",
         )
         self.assertTrue(valid.passed)
         self.assertIn("host/task-control", valid.cleanup_responsibility)
@@ -286,22 +309,23 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             before,
             after,
             expected_sha="0" * 40,
-            implementation_branch=after.branch or "codex/5-harden-coordination-resilience",
+            implementation_branch="main",
             declared_outputs=[".pytest_cache"],
             intents=["commit"],
+            implementation_repository_common_dir="implementation-common",
         )
         self.assertFalse(invalid.passed)
         self.assertTrue(any("exact expected" in error for error in invalid.errors))
         self.assertTrue(any("forbidden" in error for error in invalid.errors))
 
     def test_qa_workspace_rejects_preexisting_dirty_snapshot(self) -> None:
-        clean = WorkspaceSnapshot(head="a" * 40, branch="", status=(), source_diff="")
-        dirty = WorkspaceSnapshot(head="a" * 40, branch="", status=(" M source.py",), source_diff="diff")
-        result = verify_qa_workspace(dirty, dirty, expected_sha="a" * 40, implementation_branch="main", exit_code=0)
+        clean = WorkspaceSnapshot(head="a" * 40, branch="", status=(), source_diff="", implementation_ref=("refs/heads/main", "a" * 40), git_common_dir="qa-common")
+        dirty = WorkspaceSnapshot(head="a" * 40, branch="", status=(" M source.py",), source_diff="diff", implementation_ref=("refs/heads/main", "a" * 40), git_common_dir="qa-common")
+        result = verify_qa_workspace(dirty, dirty, expected_sha="a" * 40, implementation_branch="main", exit_code=0, implementation_repository_common_dir="implementation-common")
         self.assertFalse(result.passed)
         self.assertIn("pre-existing", " ".join(result.errors))
         self.assertEqual(result.before.head, result.after.head)
-        self.assertTrue(verify_qa_workspace(clean, clean, expected_sha="a" * 40, implementation_branch="main").passed)
+        self.assertTrue(verify_qa_workspace(clean, clean, expected_sha="a" * 40, implementation_branch="main", implementation_repository_common_dir="implementation-common").passed)
 
     def test_cycle4_direction_identity_and_typed_intent_guards(self) -> None:
         lifecycle = self.lifecycle()
@@ -884,24 +908,35 @@ class RepositoryStateTests(unittest.TestCase):
         temporary = ROOT / "tests" / ".tmp" / str(uuid4())
         temporary.mkdir(parents=True)
         self.addCleanup(shutil.rmtree, temporary, ignore_errors=True)
-        target = temporary / "qa"
-        target.mkdir()
-        def run(*args: str) -> str:
-            result = subprocess.run(["git", *args], cwd=target, text=True, capture_output=True, check=False)
+        source = temporary / "implementation"
+        source.mkdir()
+        def run(cwd: Path, *args: str) -> str:
+            result = subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             return result.stdout.strip()
-        run("init")
-        run("config", "user.email", "qa@example.com")
-        run("config", "user.name", "QA")
-        (target / "source.txt").write_text("source\n", encoding="utf-8")
-        run("add", "source.txt")
-        run("commit", "-m", "initial")
-        run("branch", "-M", "main")
-        sha = run("rev-parse", "HEAD")
-        run("checkout", "--detach", sha)
+        run(source, "init")
+        run(source, "config", "user.email", "implementation@example.com")
+        run(source, "config", "user.name", "Implementation")
+        (source / "source.txt").write_text("source\n", encoding="utf-8")
+        run(source, "add", "source.txt")
+        run(source, "commit", "-m", "initial")
+        run(source, "branch", "-M", "main")
+        sha = run(source, "rev-parse", "HEAD")
+        target = temporary / "qa"
+        clone = subprocess.run(["git", "clone", str(source), str(target)], text=True, capture_output=True, check=False)
+        self.assertEqual(clone.returncode, 0, clone.stderr)
+        run(target, "config", "user.email", "qa@example.com")
+        run(target, "config", "user.name", "QA")
+        run(target, "checkout", "--detach", sha)
+        if not hasattr(self, "_qa_sources"):
+            self._qa_sources: dict[Path, Path] = {}
+        self._qa_sources[target] = source
         return target, sha
 
-    def run_qa_cli(self, target: Path, sha: str, code: str, *options: str) -> subprocess.CompletedProcess[str]:
+    def run_qa_cli(
+        self, target: Path, sha: str, code: str, *options: str, implementation_branch: str = "main"
+    ) -> subprocess.CompletedProcess[str]:
+        source = self._qa_sources[target]
         command = [
             sys.executable,
             str(ROOT / "scripts" / "qa_workspace.py"),
@@ -909,7 +944,9 @@ class RepositoryStateTests(unittest.TestCase):
             "--expected-sha",
             sha,
             "--implementation-branch",
-            "main",
+            implementation_branch,
+            "--implementation-repository",
+            str(source),
             *options,
             "--",
             sys.executable,
@@ -917,6 +954,9 @@ class RepositoryStateTests(unittest.TestCase):
             code,
         ]
         return subprocess.run(command, text=True, capture_output=True, check=False)
+
+    def qa_source(self, target: Path) -> Path:
+        return self._qa_sources[target]
 
     def test_qa_cli_executes_shell_free_command_and_reports_both_snapshots(self) -> None:
         target, sha = self.qa_repository()
@@ -928,6 +968,40 @@ class RepositoryStateTests(unittest.TestCase):
         self.assertEqual(payload["exit_code"], 0)
         self.assertTrue(payload["command"])
         self.assertEqual(payload["before"]["branch_refs"], payload["after"]["branch_refs"])
+        self.assertEqual(payload["before"]["implementation_ref"], ["refs/heads/main", sha])
+        self.assertNotEqual(payload["before"]["git_common_dir"], str((self.qa_source(target) / ".git").resolve()))
+
+    def test_qa_cli_uses_isolated_clone_and_ignores_unrelated_source_ref_change(self) -> None:
+        target, sha = self.qa_repository()
+        source = self.qa_source(target)
+        code = f"import subprocess; subprocess.run(['git','-C',{str(source)!r},'branch','unrelated-source-branch'], check=True)"
+        result = self.run_qa_cli(target, sha, code)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertNotEqual(payload["before"]["git_common_dir"], str((source / ".git").resolve()))
+        self.assertEqual(payload["before"]["branch_refs"], payload["after"]["branch_refs"])
+
+    def test_qa_cli_rejects_missing_wrong_and_moved_implementation_ref(self) -> None:
+        target, sha = self.qa_repository()
+        missing = self.run_qa_cli(target, sha, "pass", implementation_branch="missing")
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("implementation ref", missing.stdout)
+        target, sha = self.qa_repository()
+        wrong = self.run_qa_cli(
+            target,
+            sha,
+            f"import subprocess; subprocess.run(['git','commit','--allow-empty','-m','temporary'], check=True); new=subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(); subprocess.run(['git','update-ref','refs/heads/main',new], check=True); subprocess.run(['git','reset','--hard','{sha}'], check=True)",
+        )
+        self.assertEqual(wrong.returncode, 2)
+        self.assertIn("implementation ref", wrong.stdout)
+        target, sha = self.qa_repository()
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "moved-before-qa"], cwd=target, check=True, capture_output=True)
+        moved_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=target, text=True, capture_output=True, check=True).stdout.strip()
+        subprocess.run(["git", "update-ref", "refs/heads/main", moved_sha], cwd=target, check=True, capture_output=True)
+        subprocess.run(["git", "reset", "--hard", sha], cwd=target, check=True, capture_output=True)
+        moved = self.run_qa_cli(target, sha, "pass")
+        self.assertEqual(moved.returncode, 2)
+        self.assertIn("implementation ref", moved.stdout)
 
     def test_qa_cli_rejects_create_then_detach_branch_ref_change(self) -> None:
         target, sha = self.qa_repository()
@@ -1073,6 +1147,8 @@ class RepositoryStateTests(unittest.TestCase):
                 qa_sha,
                 "--implementation-branch",
                 "main",
+                "--implementation-repository",
+                str(self.qa_source(qa_target)),
                 "--",
                 sys.executable,
                 "-c",

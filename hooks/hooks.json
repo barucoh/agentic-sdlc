@@ -1,0 +1,19 @@
+{
+  "description": "Validate Agentic SDLC handoffs before native visible-task creation or cross-task delivery.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(codex_app__create_thread|codex_app__send_message_to_thread)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/hooks/pretool_handoff_guard.py\"",
+            "commandWindows": "py -3 \"%PLUGIN_ROOT%\\hooks\\pretool_handoff_guard.py\"",
+            "timeout": 5,
+            "statusMessage": "Validating Agentic SDLC handoff"
+          }
+        ]
+      }
+    ]
+  }
+}
