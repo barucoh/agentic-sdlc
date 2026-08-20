@@ -1,11 +1,12 @@
+# agentic-sdlc:managed hook-guard/v1
 #!/usr/bin/env python3
-"""Synchronous native-task guard for Agentic SDLC plugin hooks."""
+"""Synchronous repository-native task-boundary guard for Agentic SDLC."""
 
 from __future__ import annotations
 
 import json
-import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,9 +16,28 @@ TOOL_NAMES = frozenset({"codex_app__create_thread", "codex_app__send_message_to_
 SCHEMA_VERSION = "1.0.0"
 
 
-def plugin_root() -> Path:
-    configured = os.environ.get("PLUGIN_ROOT")
-    return Path(configured).resolve() if configured else Path(__file__).resolve().parents[1]
+def repository_root() -> Path:
+    """Resolve the hook authority from the current Git repository, never a plugin."""
+
+    output = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    )
+    return Path(output.strip()).resolve()
+
+
+def is_agentic_sdlc_project(root: Path) -> bool:
+    """A copied command cannot impose ASDLC policy on an unrelated repository."""
+
+    return all(
+        (root / relative).is_file()
+        for relative in (
+            Path(".agentic-sdlc/config.yaml"),
+            Path(".agentic-sdlc/handoff.schema.json"),
+            Path("scripts/coordination_protocol.py"),
+        )
+    )
 
 
 def canonical_validator(root: Path):
@@ -47,7 +67,7 @@ def _envelope_from_text(text: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             return None
         return value if isinstance(value, dict) else None
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL | re.IGNORECASE)
+    fenced = re.search(r"\x60\x60\x60(?:json)?\s*(\{.*?\})\s*\x60\x60\x60", text, re.DOTALL | re.IGNORECASE)
     return _json_object(fenced.group(1)) if fenced else None
 
 
@@ -86,10 +106,16 @@ def denial(errors: list[str]) -> dict[str, Any]:
 def evaluate(event: dict[str, Any], root: Path | None = None) -> dict[str, Any] | None:
     if event.get("tool_name") not in TOOL_NAMES:
         return None
+    try:
+        resolved_root = (root or repository_root()).resolve()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    if not is_agentic_sdlc_project(resolved_root):
+        return None
     envelope = extract_envelope(event.get("tool_input"))
     if envelope is None:
         return denial(["missing versioned ASDLC envelope in tool_input prompt or metadata"])
-    errors = canonical_validator(root or plugin_root())(envelope)
+    errors = canonical_validator(resolved_root)(envelope)
     return denial(errors) if errors else None
 
 

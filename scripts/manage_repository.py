@@ -26,7 +26,7 @@ MANIFEST_PATH = Path(".agentic-sdlc/managed.json")
 AGENTS_PATH = Path("AGENTS.md")
 BLOCK_START = "<!-- agentic-sdlc:start -->"
 BLOCK_END = "<!-- agentic-sdlc:end -->"
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 MANAGED_PATHS = tuple(
@@ -35,6 +35,7 @@ MANAGED_PATHS = tuple(
         ".agentic-sdlc/config.yaml",
         ".agentic-sdlc/handoff.schema.json",
         ".agentic-sdlc/handoff-template.json",
+        ".codex/hooks.json",
         ".codex/agents/architecture.toml",
         ".codex/agents/coordinator.toml",
         ".codex/agents/implementation.toml",
@@ -43,12 +44,22 @@ MANAGED_PATHS = tuple(
         ".codex/agents/qa.toml",
         ".codex/agents/reviewer.toml",
         "scripts/coordination_protocol.py",
+        "scripts/pretool_handoff_guard.py",
         "scripts/validate_handoff.py",
+        "scripts/validate_hooks.py",
         "scripts/qa_workspace.py",
         "docs/agentic-sdlc/coordination.md",
         "docs/agentic-sdlc/hooks.md",
         "docs/agentic-sdlc/role-contracts.md",
     )
+)
+MANIFEST_V1_MANAGED_PATHS = frozenset(
+    frozenset(MANAGED_PATHS)
+    - {
+        Path(".codex/hooks.json"),
+        Path("scripts/pretool_handoff_guard.py"),
+        Path("scripts/validate_hooks.py"),
+    }
 )
 CREATE_IF_MISSING = (
     Path("docs/decisions/INDEX.md"),
@@ -151,7 +162,8 @@ def manifest_validation_errors(target: Path, installed: dict, project_name: str)
     expected_keys = {"schema_version", "plugin_version", "project_name", "files", "managed_blocks"}
     if set(installed) != expected_keys:
         errors.append("managed-state manifest fields differ from the authority schema")
-    if installed.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+    is_v1 = installed.get("schema_version") == 1
+    if installed.get("schema_version") not in {1, MANIFEST_SCHEMA_VERSION}:
         errors.append(f"managed-state schema_version must be {MANIFEST_SCHEMA_VERSION}")
     if installed.get("plugin_version") != plugin_version():
         errors.append(f"managed-state plugin_version must be {plugin_version()}")
@@ -160,12 +172,13 @@ def manifest_validation_errors(target: Path, installed: dict, project_name: str)
 
     files = installed.get("files")
     expected_paths = {relative.as_posix() for relative in MANAGED_PATHS}
+    recorded_paths = {relative.as_posix() for relative in (MANIFEST_V1_MANAGED_PATHS if is_v1 else MANAGED_PATHS)}
     if not isinstance(files, dict):
         errors.append("managed-state files must be an object")
     else:
-        if set(files) != expected_paths:
+        if set(files) != recorded_paths:
             errors.append("managed-state files must list every and only managed path")
-        for relative_text in sorted(expected_paths):
+        for relative_text in sorted(recorded_paths):
             recorded = files.get(relative_text)
             if not isinstance(recorded, str) or SHA256_PATTERN.fullmatch(recorded) is None:
                 errors.append(f"managed-state hash is invalid for {relative_text}")

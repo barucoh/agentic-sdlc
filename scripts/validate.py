@@ -55,16 +55,21 @@ required_files = [
     ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/handoff-template.json",
     ROOT / "scripts/manage_repository.py",
     ROOT / "scripts/coordination_protocol.py",
+    ROOT / "scripts/pretool_handoff_guard.py",
     ROOT / "scripts/validate_handoff.py",
+    ROOT / ".codex/hooks.json",
     ROOT / "scripts/qa_workspace.py",
-    ROOT / "hooks/hooks.json",
-    ROOT / "hooks/pretool_handoff_guard.py",
     ROOT / "scripts/validate_hooks.py",
+    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.codex/hooks.json",
+    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/scripts/pretool_handoff_guard.py",
+    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/scripts/validate_hooks.py",
     ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/docs/agentic-sdlc/hooks.md",
 ]
 for path in required_files:
     if not path.is_file():
         errors.append(f"missing template: {path.relative_to(ROOT)}")
+if (ROOT / "hooks").is_dir() and any((ROOT / "hooks").iterdir()):
+    errors.append("plugin must not bundle an automatically discovered hooks directory")
 
 config = (ROOT / ".agentic-sdlc/config.yaml").read_text(encoding="utf-8")
 errors.extend(f"invalid self-hosted session-title config: {error}" for error in validate_session_title_config(config))
@@ -143,6 +148,8 @@ if (template_root / ".codex/config.toml").exists():
 legacy_name = "scr" + "ibe"
 for relative in subprocess.run(["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.splitlines():
     path = ROOT / relative
+    if not path.is_file():
+        continue
     try:
         if legacy_name.lower() in path.read_text(encoding="utf-8").lower():
             errors.append(f"legacy role name occurs in {relative}")

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Validate and render every committed Mermaid block with the pinned CLI. */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,7 +12,9 @@ const files = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" })
   .filter(Boolean);
 const blocks = [];
 for (const file of files) {
-  const source = readFileSync(join(root, file), "utf8");
+  const path = join(root, file);
+  if (!existsSync(path)) continue;
+  const source = readFileSync(path, "utf8");
   for (const match of source.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)) {
     blocks.push({ file, source: match[1] });
   }

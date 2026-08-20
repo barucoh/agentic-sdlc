@@ -265,27 +265,52 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertIn("objective", rejected.stdout)
 
     def test_native_task_hook_uses_canonical_validator_and_observed_tool_names(self) -> None:
-        hook_config = json.loads((ROOT / "hooks/hooks.json").read_text(encoding="utf-8"))
+        hook_config = json.loads((ROOT / ".codex/hooks.json").read_text(encoding="utf-8"))
         self.assertEqual(set(hook_config), {"hooks"}, "Codex 0.142.0 rejects unsupported hook manifest metadata")
         group = hook_config["hooks"]["PreToolUse"][0]
         self.assertIn("codex_app__create_thread", group["matcher"])
         self.assertIn("codex_app__send_message_to_thread", group["matcher"])
+        handler = group["hooks"][0]
+        self.assertIn("git','rev-parse','--show-toplevel", handler["command"])
+        self.assertIn("git','rev-parse','--show-toplevel", handler["commandWindows"])
+        self.assertNotIn("PLUGIN_ROOT", json.dumps(hook_config))
         self.assertNotIn("hooks", json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8")))
-        guard = ROOT / "hooks/pretool_handoff_guard.py"
-        environment = {**__import__("os").environ, "PLUGIN_ROOT": str(ROOT)}
+        self.assertFalse(any((ROOT / "hooks").iterdir()) if (ROOT / "hooks").is_dir() else False, "the plugin must not register hooks outside an adopted repository")
+        guard = ROOT / "scripts/pretool_handoff_guard.py"
         valid_event = {"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(self.handoff())}}
-        allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(valid_event), text=True, capture_output=True, env=environment, check=False)
+        allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(valid_event), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(allowed.returncode, 0)
         self.assertEqual(allowed.stdout.strip(), "")
         invalid = self.handoff()
         invalid["objective"] = ""
-        denied = subprocess.run([sys.executable, str(guard)], input=json.dumps({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"metadata": {"handoff": invalid}}}), text=True, capture_output=True, env=environment, check=False)
+        denied = subprocess.run([sys.executable, str(guard)], input=json.dumps({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"metadata": {"handoff": invalid}}}), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(denied.returncode, 0)
         decision = json.loads(denied.stdout)["hookSpecificOutput"]
         self.assertEqual(decision["permissionDecision"], "deny")
         self.assertIn("ASDLC_HANDOFF_INVALID", decision["permissionDecisionReason"])
         self.assertIn("no task/message was created", decision["permissionDecisionReason"])
         self.assertEqual(subprocess.run([sys.executable, str(ROOT / "scripts/validate_hooks.py")], text=True, capture_output=True, check=False).returncode, 0)
+
+    def test_unrelated_repository_has_no_asdlc_hook_or_guard_effect(self) -> None:
+        temporary = ROOT / "tests" / ".tmp" / str(uuid4())
+        temporary.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, temporary, ignore_errors=True)
+        subprocess.run(["git", "init"], cwd=temporary, text=True, capture_output=True, check=True)
+        self.assertFalse((temporary / ".codex/hooks.json").exists())
+        probe = {
+            "tool_name": "codex_app__create_thread",
+            "tool_input": {"prompt": "ASDLC_HANDOFF: {\"schema_version\": \"1.0.0\"}"},
+        }
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/pretool_handoff_guard.py")],
+            input=json.dumps(probe),
+            text=True,
+            capture_output=True,
+            cwd=temporary,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "")
 
     def test_qa_workspace_is_disposable_and_source_immutable(self) -> None:
         contract = tomllib.loads((ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.codex/agents/qa.toml").read_text(encoding="utf-8"))["developer_instructions"].lower()
@@ -550,6 +575,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         matches = []
         for relative in subprocess.run(["git", "ls-files"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.splitlines():
             path = ROOT / relative
+            if not path.is_file():
+                continue
             try:
                 if legacy_name.lower() in path.read_text(encoding="utf-8").lower():
                     matches.append(path)
@@ -1102,7 +1129,14 @@ class RepositoryStateTests(unittest.TestCase):
         self.assertIn(("delete", ".codex/config.toml"), classifications)
         self.assertFalse((target / ".codex/config.toml").exists())
         self.assertEqual(tomllib.loads((target / ".codex/agents/coordinator.toml").read_text(encoding="utf-8"))["name"], "coordinator")
-        for relative in ("scripts/coordination_protocol.py", "scripts/validate_handoff.py", "scripts/qa_workspace.py"):
+        for relative in (
+            ".codex/hooks.json",
+            "scripts/coordination_protocol.py",
+            "scripts/pretool_handoff_guard.py",
+            "scripts/validate_handoff.py",
+            "scripts/validate_hooks.py",
+            "scripts/qa_workspace.py",
+        ):
             self.assertTrue((target / relative).is_file(), relative)
         config = (target / ".agentic-sdlc/config.yaml").read_text(encoding="utf-8")
         self.assertIn('project_name: "Legacy Fixture"', config)
@@ -1118,16 +1152,32 @@ class RepositoryStateTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, temporary)
         target = temporary / "fresh"
         target.mkdir()
+        subprocess.run(["git", "init"], cwd=target, text=True, capture_output=True, check=True)
         actions, writes, obsolete = manage_repository.plan(target, "Fresh Fixture")
         self.assertFalse([action for action in actions if action.classification == "conflict"])
         manage_repository.apply(target, writes, obsolete, "Fresh Fixture")
-        for relative in ("scripts/coordination_protocol.py", "scripts/validate_handoff.py", "scripts/qa_workspace.py"):
+        for relative in (
+            ".codex/hooks.json",
+            "scripts/coordination_protocol.py",
+            "scripts/pretool_handoff_guard.py",
+            "scripts/validate_handoff.py",
+            "scripts/validate_hooks.py",
+            "scripts/qa_workspace.py",
+        ):
             self.assertTrue((target / relative).is_file(), relative)
         handoff_path = target / ".agentic-sdlc/handoff-template.json"
         valid = json.loads(handoff_path.read_text(encoding="utf-8"))
         cli = target / "scripts/validate_handoff.py"
         accepted = subprocess.run([sys.executable, str(cli)], input=json.dumps(valid), text=True, capture_output=True, cwd=target, check=False)
         self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+        hook_validator = subprocess.run(
+            [sys.executable, str(target / "scripts/validate_hooks.py")],
+            text=True,
+            capture_output=True,
+            cwd=target,
+            check=False,
+        )
+        self.assertEqual(hook_validator.returncode, 0, hook_validator.stdout + hook_validator.stderr)
         invalid = copy.deepcopy(valid)
         invalid["objective"] = ""
         dispatch_probe = "import json,sys; sys.path.insert(0, 'scripts'); from coordination_protocol import dispatch_issue_task; dispatch_issue_task(json.loads(sys.stdin.read()), lambda _: print('DISPATCH_CALLED'))"
@@ -1167,6 +1217,24 @@ class RepositoryStateTests(unittest.TestCase):
         runtime.write_text(runtime.read_text(encoding="utf-8") + "\n# local drift\n", encoding="utf-8")
         actions, _, _ = manage_repository.plan(target, "Fresh Fixture")
         self.assertIn(("conflict", "scripts/qa_workspace.py"), {(a.classification, a.path.as_posix()) for a in actions})
+
+    def test_manifest_v1_migrates_project_hook_assets_without_conflict(self) -> None:
+        target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
+        manifest_path = target / ".agentic-sdlc/managed.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        hook_assets = {".codex/hooks.json", "scripts/pretool_handoff_guard.py", "scripts/validate_hooks.py"}
+        manifest["schema_version"] = 1
+        for relative in hook_assets:
+            manifest["files"].pop(relative)
+            (target / relative).unlink()
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        actions, writes, obsolete = manage_repository.plan(target, "Customized Fixture")
+        self.assertFalse([action for action in actions if action.classification == "conflict"])
+        self.assertTrue(hook_assets <= {action.path.as_posix() for action in actions if action.classification == "create"})
+        manage_repository.apply(target, writes, obsolete, "Customized Fixture")
+        migrated = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(migrated["schema_version"], manage_repository.MANIFEST_SCHEMA_VERSION)
+        self.assertTrue(hook_assets <= set(migrated["files"]))
 
     def test_windows_crlf_noop_apply_preserves_managed_manifest_bytes(self) -> None:
         target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
