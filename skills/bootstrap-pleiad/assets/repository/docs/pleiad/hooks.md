@@ -5,7 +5,7 @@ Pleiad does not install a plugin-global hook. Bootstrap and upgrade manage .code
 
 The project hook is synchronous PreToolUse policy for the observed Codex Desktop local-function names codex_app__create_thread and codex_app__send_message_to_thread; both current tool contracts carry the caller prompt in tool_input.prompt. Its command resolves the Git root with git rev-parse --show-toplevel and then runs the repository-local guard. It never uses PLUGIN_ROOT.
 
-The guard extracts an Pleiad versioned envelope from tool_input.metadata (handoff, envelope, or pleiad_handoff) or from tool_input.prompt as complete JSON, a fenced JSON object, or ASDLC_HANDOFF: { ... }. It runs the same scripts/coordination_protocol.py:validate_handoff authority used by the CLI and pre-dispatch helpers. Missing or invalid envelopes are denied before a supported native call with an ASDLC_HANDOFF_INVALID reason; the Coordinator’s CLI preflight remains defense in depth.
+The guard extracts a Pleiad versioned envelope from tool_input.metadata (`handoff`, `envelope`, or `pleiad_handoff`) or from tool_input.prompt as complete JSON, fenced JSON, or `PLEIAD_HANDOFF: { ... }`. Missing or invalid envelopes are denied with `PLEIAD_HANDOFF_INVALID` before a supported native call. The old `agentic_sdlc_handoff` metadata key and `ASDLC_HANDOFF` prompt marker remain tested compatibility aliases for an installed v0.3.0 project; they are not canonical Pleiad forms.
 
 ## Enablement and coverage
 

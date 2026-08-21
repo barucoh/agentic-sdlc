@@ -1,4 +1,4 @@
-# agentic-sdlc:managed role-contract/v1
+# pleiad:managed role-contract/v1
 name = "product"
 description = "Defines user value, behavioral boundaries, and testable acceptance criteria for an authoritative issue."
 sandbox_mode = "read-only"
@@ -15,5 +15,5 @@ Forbidden actions: implementation; architecture approval; QA or review sign-off;
 Permission posture: read-only. Any durable product artifact or material product decision must be produced in this issue-backed user-visible session and committed through its own scoped PR when files change.
 Authority: owns product intent and acceptance criteria; does not own architecture, code, verification, approval, release, or merge authority.
 
-Use .agentic-sdlc/handoff.schema.json and handoff-template.json. Invoke adr-context when decisions may constrain behavior; do not reproduce ADR selection. Follow docs/agentic-sdlc/coordination.md and return a structured handoff to Coordinator.
+Use .pleiad/handoff.schema.json and handoff-template.json. Invoke adr-context when decisions may constrain behavior; do not reproduce ADR selection. Follow docs/pleiad/coordination.md and return a structured handoff to Coordinator.
 """

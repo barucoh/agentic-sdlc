@@ -178,9 +178,17 @@ hook_validation = subprocess.run(
 if hook_validation.returncode:
     errors.append("native task-boundary hook validation failed: " + hook_validation.stderr.strip())
 
-# The checkout's .codex directory is host-managed saved-project state.  Its
-# contents are intentionally not rewritten by a release rename; fresh and
-# upgraded repository state is verified by the isolated migration tests.
+try:
+    state_actions, _, _ = manage_repository.plan(ROOT, "Pleiad")
+    drift = [
+        action
+        for action in state_actions
+        if action.classification in {"create", "update", "managed-block-update", "delete", "conflict"}
+    ]
+    if drift:
+        errors.append("self-hosted repository drift: " + ", ".join(f"{a.classification}:{a.path.as_posix()}" for a in drift))
+except Exception as exc:
+    errors.append(f"self-hosted repository state check failed: {exc}")
 
 if errors:
     print("Validation failed:")

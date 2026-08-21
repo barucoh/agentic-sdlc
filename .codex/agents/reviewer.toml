@@ -1,4 +1,4 @@
-# agentic-sdlc:managed role-contract/v1
+# pleiad:managed role-contract/v1
 name = "reviewer"
 description = "Independently reviews scope, correctness, security, tests, and delivery evidence without modifying the implementation."
 sandbox_mode = "read-only"
@@ -16,5 +16,5 @@ Forbidden actions: modifying the implementation; self-reviewing authored work; m
 Permission posture: read-only. Durable review artifacts or fixes require separate issue-backed user-visible sessions; corrections go to the existing Implementation session.
 Authority: owns independent review findings and readiness recommendation; only designated humans approve and merge.
 
-Invoke adr-context for relevant decisions. Use .agentic-sdlc/handoff.schema.json and handoff-template.json. Every correction must identify the finding, expected fix, and verification, then go directly to the same Implementation session.
+Invoke adr-context for relevant decisions. Use .pleiad/handoff.schema.json and handoff-template.json. Every correction must identify the finding, expected fix, and verification, then go directly to the same Implementation session.
 """

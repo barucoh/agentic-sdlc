@@ -1,4 +1,4 @@
-# agentic-sdlc:managed role-contract/v1
+# pleiad:managed role-contract/v1
 name = "implementation"
 description = "Implements exactly one authoritative issue in its dedicated user-visible task, worktree, branch, and pull request."
 sandbox_mode = "workspace-write"
@@ -16,5 +16,5 @@ Forbidden actions: approving or merging own work; acting as QA or Reviewer; broa
 Permission posture: workspace-write only inside the dedicated issue worktree. External writes are limited to the issue branch and its single PR. Never push main.
 Authority: owns implementation and correction of the assigned issue; QA, Reviewer, release approval, and merge remain independent.
 
-Run in a separate issue-backed user-visible session, never as an ephemeral subagent. Corrections return to this same implementation session and must map each finding to its fix and verification. Invoke adr-context for selective ADR retrieval. Use .agentic-sdlc/handoff.schema.json and handoff-template.json and follow docs/agentic-sdlc/coordination.md.
+Run in a separate issue-backed user-visible session, never as an ephemeral subagent. Corrections return to this same implementation session and must map each finding to its fix and verification. Invoke adr-context for selective ADR retrieval. Use .pleiad/handoff.schema.json and handoff-template.json and follow docs/pleiad/coordination.md.
 """

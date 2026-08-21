@@ -50,10 +50,14 @@ def main() -> int:
         print("repository hook command must be cross-platform and resolve from the Git root", file=sys.stderr)
         return 2
     template = json.loads((ROOT / ".pleiad" / "handoff-template.json").read_text(encoding="utf-8"))
-    valid = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(template)}})
-    invalid = run_guard({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: {\"schema_version\": \"1.0.0\"}"}})
+    valid = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(template)}})
+    legacy = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(template)}})
+    invalid = run_guard({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: {\"schema_version\": \"1.0.0\"}"}})
     if valid.returncode != 0 or valid.stdout.strip():
         print("valid native-task hook probe was not allowed", file=sys.stderr)
+        return 2
+    if legacy.returncode != 0 or legacy.stdout.strip():
+        print("legacy Agentic SDLC hook alias was not allowed", file=sys.stderr)
         return 2
     try:
         denial = json.loads(invalid.stdout)
@@ -61,7 +65,7 @@ def main() -> int:
     except (KeyError, json.JSONDecodeError) as exc:
         print(f"invalid native-task hook probe did not return a denial: {exc}", file=sys.stderr)
         return 2
-    if invalid.returncode != 0 or denial["hookSpecificOutput"].get("permissionDecision") != "deny" or "ASDLC_HANDOFF_INVALID" not in reason:
+    if invalid.returncode != 0 or denial["hookSpecificOutput"].get("permissionDecision") != "deny" or "PLEIAD_HANDOFF_INVALID" not in reason:
         print("invalid native-task hook probe was not denied", file=sys.stderr)
         return 2
     print("Validated repository-native task-boundary hook contract for codex_app__create_thread and codex_app__send_message_to_thread")

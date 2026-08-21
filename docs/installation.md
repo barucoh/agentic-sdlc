@@ -50,6 +50,6 @@ After publication, install Pleiad from the shared Plugins Directory and begin wo
 
 ## Replacing Agentic SDLC v0.3.0
 
-Pleiad has a new plugin identifier. Remove the old installation with `codex plugin remove agentic-sdlc`, then install `pleiad` from the Pleiad marketplace and start a new session. This does not modify adopted repositories; run `upgrade-pleiad` in each one afterwards.
+Pleiad has a new plugin identifier. Remove the old installation with `codex plugin remove agentic-sdlc@agentic-sdlc-public` (replace the marketplace selector if your team uses a different one), then install `pleiad` from the Pleiad marketplace and start a new session. This does not modify adopted repositories; run `upgrade-pleiad` in each one afterwards.
 
 Codex’s saved-project label and local checkout path are host UI state, so Pleiad does not edit them. After the repository rename has merged, use Codex’s supported saved-project UI to rename or remove and re-add the project, pointing it to the new local `pleiad` checkout.

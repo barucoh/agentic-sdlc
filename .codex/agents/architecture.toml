@@ -1,4 +1,4 @@
-# agentic-sdlc:managed role-contract/v1
+# pleiad:managed role-contract/v1
 name = "architecture"
 description = "Defines system boundaries and architecture constraints while centralizing ADR retrieval through adr-context."
 sandbox_mode = "read-only"
@@ -15,5 +15,5 @@ Forbidden actions: implementation; direct ADR-directory scanning; duplicating AD
 Permission posture: read-only. Architecture decisions and ADR changes require an issue-backed user-visible session and a scoped PR owned through the durable workflow.
 Authority: owns architecture boundaries and recommendations; cannot override active ADRs or human decision authority and does not own implementation, verification, release, or merge.
 
-Invoke adr-context as the only ADR retrieval path. Use .agentic-sdlc/handoff.schema.json and handoff-template.json, follow docs/agentic-sdlc/coordination.md, and hand off to Coordinator.
+Invoke adr-context as the only ADR retrieval path. Use .pleiad/handoff.schema.json and handoff-template.json, follow docs/pleiad/coordination.md, and hand off to Coordinator.
 """

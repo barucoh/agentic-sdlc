@@ -277,17 +277,21 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertNotIn("hooks", json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8")))
         self.assertFalse(any((ROOT / "hooks").iterdir()) if (ROOT / "hooks").is_dir() else False, "the plugin must not register hooks outside an adopted repository")
         guard = ROOT / "scripts/pretool_handoff_guard.py"
-        valid_event = {"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(self.handoff())}}
+        valid_event = {"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(self.handoff())}}
         allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(valid_event), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(allowed.returncode, 0)
         self.assertEqual(allowed.stdout.strip(), "")
+        legacy_event = {"tool_name": "codex_app__create_thread", "tool_input": {"metadata": {"agentic_sdlc_handoff": self.handoff()}}}
+        legacy_allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(legacy_event), text=True, capture_output=True, cwd=ROOT, check=False)
+        self.assertEqual(legacy_allowed.returncode, 0)
+        self.assertEqual(legacy_allowed.stdout.strip(), "")
         invalid = self.handoff()
         invalid["objective"] = ""
         denied = subprocess.run([sys.executable, str(guard)], input=json.dumps({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"metadata": {"handoff": invalid}}}), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(denied.returncode, 0)
         decision = json.loads(denied.stdout)["hookSpecificOutput"]
         self.assertEqual(decision["permissionDecision"], "deny")
-        self.assertIn("ASDLC_HANDOFF_INVALID", decision["permissionDecisionReason"])
+        self.assertIn("PLEIAD_HANDOFF_INVALID", decision["permissionDecisionReason"])
         self.assertIn("no task/message was created", decision["permissionDecisionReason"])
         self.assertEqual(subprocess.run([sys.executable, str(ROOT / "scripts/validate_hooks.py")], text=True, capture_output=True, check=False).returncode, 0)
 
@@ -299,7 +303,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertFalse((temporary / ".codex/hooks.json").exists())
         probe = {
             "tool_name": "codex_app__create_thread",
-            "tool_input": {"prompt": "ASDLC_HANDOFF: {\"schema_version\": \"1.0.0\"}"},
+            "tool_input": {"prompt": "PLEIAD_HANDOFF: {\"schema_version\": \"1.0.0\"}"},
         }
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/pretool_handoff_guard.py")],
@@ -1179,16 +1183,31 @@ class RepositoryStateTests(unittest.TestCase):
 
     def test_v0_3_identity_migration_is_safe_and_idempotent(self) -> None:
         target = self.v0_3_repository()
-        actions, writes, deletions = manage_repository.plan(target, "Legacy Repository")
-        self.assertFalse([action for action in actions if action.classification == "conflict"])
-        self.assertIn(("delete", ".agentic-sdlc/managed.json"), {(a.classification, a.path.as_posix()) for a in actions})
-        manage_repository.apply(target, writes, deletions, "Legacy Repository")
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/manage_repository.py"), "apply", "--target", str(target)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("delete: .agentic-sdlc/managed.json", result.stdout)
         self.assertFalse((target / ".agentic-sdlc").exists())
         self.assertFalse((target / "docs/agentic-sdlc").exists())
         self.assertTrue((target / ".pleiad/managed.json").is_file())
         self.assertIn('project_name: "Legacy Repository"', (target / ".pleiad/config.yaml").read_text(encoding="utf-8"))
         again, _, _ = manage_repository.plan(target, "Legacy Repository")
         self.assertFalse([a for a in again if a.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
+
+    def test_v0_3_identity_migration_rejects_conflicting_explicit_project_name(self) -> None:
+        target = self.v0_3_repository()
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/manage_repository.py"), "dry-run", "--target", str(target), "--project-name", "Wrong Name"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("legacy project_name conflicts", result.stdout)
 
     def test_v0_3_identity_migration_rejects_stale_managed_content(self) -> None:
         target = self.v0_3_repository()

@@ -282,6 +282,13 @@ def configured_project_name(target: Path) -> str | None:
     return raw or None
 
 
+def configured_legacy_project_name(target: Path) -> str | None:
+    """Read, but do not yet trust, the legacy name until plan validation."""
+    legacy = load_manifest(target / LEGACY_MANIFEST_PATH)
+    name = legacy.get("project_name")
+    return name if isinstance(name, str) and name else None
+
+
 def template_validation_errors(project_name: str) -> list[str]:
     errors: list[str] = []
     for relative in MANAGED_PATHS:
@@ -369,6 +376,8 @@ def plan(target: Path, project_name: str) -> tuple[list[Action], dict[Path, str]
             legacy = load_manifest(legacy_manifest)
             for error in legacy_manifest_errors(target, legacy):
                 actions.append(Action("conflict", LEGACY_MANIFEST_PATH, error))
+            if legacy.get("project_name") != project_name:
+                actions.append(Action("conflict", LEGACY_MANIFEST_PATH, "legacy project_name conflicts with the requested project name"))
             if not [action for action in actions if action.classification == "conflict"]:
                 for path in MANAGED_PATHS:
                     old_path = legacy_path(path)
@@ -502,6 +511,7 @@ def main() -> int:
     project_name = (
         args.project_name
         or configured_project_name(target)
+        or configured_legacy_project_name(target)
         or target.name.replace("-", " ").replace("_", " ").title()
     )
     actions, writes, delete_paths = plan(target, project_name)
