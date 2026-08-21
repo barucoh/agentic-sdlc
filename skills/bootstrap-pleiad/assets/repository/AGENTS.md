@@ -1,14 +1,3 @@
-# Pleiad repository rules
-
-- Work from a GitHub issue in a dedicated branch and worktree.
-- Name new issue-delivery sessions `#<issue number> <role code> - <issue title>` using the canonical two-character role code and a maximum full title length of 36 Unicode characters.
-- Keep each pull request scoped to one issue and include verification evidence.
-- Never push directly to `main`; only `barucoh` may approve and merge.
-- Run `python scripts/validate.py` before publishing changes.
-- Treat `.codex-plugin/plugin.json` as the release-version authority.
-- Do not change the version unless the pull request is intended to produce a release.
-- Until the first release exists, repository-source development is the documented bootstrap exception. Afterwards use the latest stable Pleiad release.
-
 <!-- pleiad:start -->
 ## Pleiad
 

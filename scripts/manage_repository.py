@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministically bootstrap, upgrade, or check repository-native Agentic SDLC state."""
+"""Deterministically bootstrap, upgrade, or check repository-native Pleiad state."""
 
 from __future__ import annotations
 
@@ -21,20 +21,23 @@ from coordination_protocol import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATES = ROOT / "skills" / "bootstrap-agentic-sdlc" / "assets" / "repository"
-MANIFEST_PATH = Path(".agentic-sdlc/managed.json")
+TEMPLATES = ROOT / "skills" / "bootstrap-pleiad" / "assets" / "repository"
+MANIFEST_PATH = Path(".pleiad/managed.json")
+LEGACY_MANIFEST_PATH = Path(".agentic-sdlc/managed.json")
 AGENTS_PATH = Path("AGENTS.md")
-BLOCK_START = "<!-- agentic-sdlc:start -->"
-BLOCK_END = "<!-- agentic-sdlc:end -->"
+BLOCK_START = "<!-- pleiad:start -->"
+BLOCK_END = "<!-- pleiad:end -->"
+LEGACY_BLOCK_START = "<!-- agentic-sdlc:start -->"
+LEGACY_BLOCK_END = "<!-- agentic-sdlc:end -->"
 MANIFEST_SCHEMA_VERSION = 2
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 MANAGED_PATHS = tuple(
     Path(path)
     for path in (
-        ".agentic-sdlc/config.yaml",
-        ".agentic-sdlc/handoff.schema.json",
-        ".agentic-sdlc/handoff-template.json",
+        ".pleiad/config.yaml",
+        ".pleiad/handoff.schema.json",
+        ".pleiad/handoff-template.json",
         ".codex/hooks.json",
         ".codex/agents/architecture.toml",
         ".codex/agents/coordinator.toml",
@@ -48,9 +51,9 @@ MANAGED_PATHS = tuple(
         "scripts/validate_handoff.py",
         "scripts/validate_hooks.py",
         "scripts/qa_workspace.py",
-        "docs/agentic-sdlc/coordination.md",
-        "docs/agentic-sdlc/hooks.md",
-        "docs/agentic-sdlc/role-contracts.md",
+        "docs/pleiad/coordination.md",
+        "docs/pleiad/hooks.md",
+        "docs/pleiad/role-contracts.md",
     )
 )
 MANIFEST_V1_MANAGED_PATHS = frozenset(
@@ -100,7 +103,7 @@ def plugin_version() -> str:
 
 def template_text(relative: Path, project_name: str) -> str:
     text = (TEMPLATES / relative).read_text(encoding="utf-8")
-    if relative == Path(".agentic-sdlc/config.yaml"):
+    if relative == Path(".pleiad/config.yaml"):
         text = re.sub(
             r"(?m)^project_name: .+$",
             f"project_name: {json.dumps(project_name, ensure_ascii=False)}",
@@ -115,7 +118,10 @@ def template_text(relative: Path, project_name: str) -> str:
 
 
 def load_installed_manifest(target: Path) -> dict:
-    path = target / MANIFEST_PATH
+    return load_manifest(target / MANIFEST_PATH)
+
+
+def load_manifest(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
@@ -125,11 +131,41 @@ def load_installed_manifest(target: Path) -> dict:
     return value if isinstance(value, dict) else {"invalid": True}
 
 
-def extract_agents_block(text: str) -> str | None:
-    if text.count(BLOCK_START) != 1 or text.count(BLOCK_END) != 1:
+def legacy_path(relative: Path) -> Path:
+    return Path(str(relative).replace(".pleiad/", ".agentic-sdlc/").replace("docs/pleiad/", "docs/agentic-sdlc/"))
+
+
+def legacy_manifest_errors(target: Path, installed: dict) -> list[str]:
+    """Accept only a pristine Agentic SDLC v0.3.0 installation for migration."""
+    errors: list[str] = []
+    if installed.get("invalid"):
+        return ["legacy Agentic SDLC managed-state manifest is not a valid JSON object"]
+    if installed.get("schema_version") != 2 or installed.get("plugin_version") != "0.3.0":
+        errors.append("legacy managed-state must be Agentic SDLC v0.3.0 schema 2")
+    files = installed.get("files")
+    expected = {legacy_path(path).as_posix() for path in MANAGED_PATHS}
+    if not isinstance(files, dict) or set(files) != expected:
+        errors.append("legacy managed-state files do not match the v0.3.0 managed path set")
+    elif any(not isinstance(value, str) or SHA256_PATTERN.fullmatch(value) is None for value in files.values()):
+        errors.append("legacy managed-state contains an invalid file hash")
+    else:
+        for path_text, recorded in files.items():
+            path = target / path_text
+            if not path.is_file() or digest_path(path) != recorded:
+                errors.append(f"legacy managed-state hash does not match {path_text}")
+    blocks = installed.get("managed_blocks")
+    recorded_block = blocks.get(AGENTS_PATH.as_posix()) if isinstance(blocks, dict) else None
+    block = extract_agents_block(target.joinpath(AGENTS_PATH).read_text(encoding="utf-8"), LEGACY_BLOCK_START, LEGACY_BLOCK_END) if (target / AGENTS_PATH).is_file() else None
+    if not isinstance(recorded_block, str) or block is None or digest_bytes(block.encode("utf-8")) != recorded_block:
+        errors.append("legacy managed-state AGENTS.md block hash does not match")
+    return errors
+
+
+def extract_agents_block(text: str, start_marker: str = BLOCK_START, end_marker: str = BLOCK_END) -> str | None:
+    if text.count(start_marker) != 1 or text.count(end_marker) != 1:
         return None
-    start = text.index(BLOCK_START)
-    end = text.index(BLOCK_END, start) + len(BLOCK_END)
+    start = text.index(start_marker)
+    end = text.index(end_marker, start) + len(end_marker)
     return text[start:end]
 
 
@@ -230,7 +266,7 @@ def recognized_legacy_config(text: str) -> bool:
 
 
 def configured_project_name(target: Path) -> str | None:
-    path = target / ".agentic-sdlc/config.yaml"
+    path = target / ".pleiad/config.yaml"
     if not path.exists():
         return None
     match = re.search(r"(?m)^project_name:\s*(.+)$", path.read_text(encoding="utf-8"))
@@ -263,7 +299,7 @@ def template_validation_errors(project_name: str) -> list[str]:
     block = desired_agents_text()
     if block.count(BLOCK_START) != 1 or block.count(BLOCK_END) != 1:
         errors.append("AGENTS.md template must contain exactly one managed block")
-    config = template_text(Path(".agentic-sdlc/config.yaml"), project_name)
+    config = template_text(Path(".pleiad/config.yaml"), project_name)
     errors.extend(f"config: {error}" for error in validate_session_title_config(config))
     for role, code in ROLE_CODES.items():
         try:
@@ -271,25 +307,29 @@ def template_validation_errors(project_name: str) -> list[str]:
         except ValueError as exc:
             errors.append(f"config: invalid role code {role}={code}: {exc}")
     try:
-        schema = json.loads(template_text(Path(".agentic-sdlc/handoff.schema.json"), project_name))
-        handoff = json.loads(template_text(Path(".agentic-sdlc/handoff-template.json"), project_name))
+        schema = json.loads(template_text(Path(".pleiad/handoff.schema.json"), project_name))
+        handoff = json.loads(template_text(Path(".pleiad/handoff-template.json"), project_name))
         errors.extend(f"handoff template: {error}" for error in validate_handoff(handoff, schema))
     except json.JSONDecodeError as exc:
         errors.append(f"handoff schema or template is invalid JSON: {exc}")
     return errors
 
 
-def is_safe_managed_update(target: Path, relative: Path, installed: dict) -> bool:
+def is_safe_managed_update(target: Path, relative: Path, installed: dict, legacy: dict | None = None) -> bool:
     path = target / relative
     recorded = recorded_file_hash(installed, relative)
     if recorded:
         return recorded == digest_path(path)
+    if legacy:
+        legacy_recorded = legacy.get("files", {}).get(legacy_path(relative).as_posix())
+        if isinstance(legacy_recorded, str):
+            return legacy_recorded == digest_path(path)
     if LEGACY_HASHES.get(relative) == digest_path(path):
         return True
-    if relative == Path(".agentic-sdlc/config.yaml"):
+    if relative == Path(".pleiad/config.yaml"):
         return recognized_legacy_config(path.read_text(encoding="utf-8"))
     first_line = path.read_text(encoding="utf-8").splitlines()[0] if path.stat().st_size else ""
-    return first_line.startswith("# agentic-sdlc:managed") or first_line.startswith("<!-- agentic-sdlc:managed")
+    return first_line.startswith("# pleiad:managed") or first_line.startswith("<!-- pleiad:managed")
 
 
 def desired_agents_text() -> str:
@@ -300,6 +340,8 @@ def desired_agents_text() -> str:
 
 
 def merge_agents(existing: str, block: str) -> tuple[str | None, str]:
+    if existing.count(LEGACY_BLOCK_START) == 1 and existing.count(LEGACY_BLOCK_END) == 1:
+        existing = existing.replace(LEGACY_BLOCK_START, BLOCK_START).replace(LEGACY_BLOCK_END, BLOCK_END)
     starts = existing.count(BLOCK_START)
     ends = existing.count(BLOCK_END)
     if starts != ends or starts > 1:
@@ -313,12 +355,30 @@ def merge_agents(existing: str, block: str) -> tuple[str | None, str]:
     return existing + separator + block + "\n", "managed block append"
 
 
-def plan(target: Path, project_name: str) -> tuple[list[Action], dict[Path, str], str | None]:
+def plan(target: Path, project_name: str) -> tuple[list[Action], dict[Path, str], list[str]]:
     installed = load_installed_manifest(target)
+    legacy: dict | None = None
     actions: list[Action] = []
     writes: dict[Path, str] = {}
+    delete_paths: list[str] = []
+    legacy_manifest = target / LEGACY_MANIFEST_PATH
+    if legacy_manifest.exists():
+        if (target / MANIFEST_PATH).exists():
+            actions.append(Action("conflict", LEGACY_MANIFEST_PATH, "both Pleiad and legacy managed state exist"))
+        else:
+            legacy = load_manifest(legacy_manifest)
+            for error in legacy_manifest_errors(target, legacy):
+                actions.append(Action("conflict", LEGACY_MANIFEST_PATH, error))
+            if not [action for action in actions if action.classification == "conflict"]:
+                for path in MANAGED_PATHS:
+                    old_path = legacy_path(path)
+                    if old_path != path:
+                        actions.append(Action("delete", old_path, "verified Agentic SDLC v0.3.0 managed path"))
+                        delete_paths.append(old_path.as_posix())
+                actions.append(Action("delete", LEGACY_MANIFEST_PATH, "verified Agentic SDLC v0.3.0 managed state"))
+                delete_paths.append(LEGACY_MANIFEST_PATH.as_posix())
     for error in template_validation_errors(project_name):
-        actions.append(Action("conflict", Path(".agentic-sdlc"), f"invalid release template: {error}"))
+        actions.append(Action("conflict", Path(".pleiad"), f"invalid release template: {error}"))
     manifest_path = target / MANIFEST_PATH
     manifest_errors = manifest_validation_errors(target, installed, project_name)
     for error in manifest_errors:
@@ -336,7 +396,7 @@ def plan(target: Path, project_name: str) -> tuple[list[Action], dict[Path, str]
             writes[relative] = desired
         elif destination.read_text(encoding="utf-8") == desired:
             actions.append(Action("unchanged", relative, "matches release candidate"))
-        elif is_safe_managed_update(target, relative, installed):
+        elif is_safe_managed_update(target, relative, installed, legacy):
             actions.append(Action("update", relative, "recognized managed or v0.2.0 file"))
             writes[relative] = desired
         else:
@@ -379,19 +439,30 @@ def plan(target: Path, project_name: str) -> tuple[list[Action], dict[Path, str]
             actions.append(Action("preserve", OBSOLETE_REGISTRY, "project-owned Codex configuration"))
 
     actions.sort(key=lambda action: (action.path.as_posix(), action.classification))
-    return actions, writes, delete_obsolete
+    if delete_obsolete:
+        delete_paths.append(delete_obsolete)
+    return actions, writes, delete_paths
 
 
-def apply(target: Path, writes: dict[Path, str], delete_obsolete: str | None, project_name: str) -> None:
-    config_path = Path(".agentic-sdlc/config.yaml")
+def apply(target: Path, writes: dict[Path, str], delete_paths: list[str], project_name: str) -> None:
+    config_path = Path(".pleiad/config.yaml")
     config_content = writes.get(config_path)
     staged_writes = {path: content for path, content in writes.items() if path != config_path}
     for relative, content in sorted(staged_writes.items(), key=lambda item: item[0].as_posix()):
         destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(content, encoding="utf-8", newline="\n")
-    if delete_obsolete:
-        (target / delete_obsolete).unlink()
+    for delete_path in delete_paths:
+        path = target / delete_path
+        if path.exists():
+            path.unlink()
+    # Remove legacy identity directories only when migration left them empty;
+    # any unrecognized project content remains untouched.
+    for directory in (target / ".agentic-sdlc", target / "docs/agentic-sdlc"):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
     for relative, content in staged_writes.items():
         if (target / relative).read_text(encoding="utf-8") != content:
             raise RuntimeError(f"post-write validation failed: {relative.as_posix()}")
@@ -400,7 +471,7 @@ def apply(target: Path, writes: dict[Path, str], delete_obsolete: str | None, pr
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(config_content, encoding="utf-8", newline="\n")
         if destination.read_text(encoding="utf-8") != config_content:
-            raise RuntimeError("post-write validation failed: .agentic-sdlc/config.yaml")
+            raise RuntimeError("post-write validation failed: .pleiad/config.yaml")
     expected_manifest = desired_manifest_value(project_name)
     for relative_text, expected_hash in expected_manifest["files"].items():
         if digest_path(target / relative_text) != expected_hash:
@@ -433,7 +504,7 @@ def main() -> int:
         or configured_project_name(target)
         or target.name.replace("-", " ").replace("_", " ").title()
     )
-    actions, writes, delete_obsolete = plan(target, project_name)
+    actions, writes, delete_paths = plan(target, project_name)
     for action in actions:
         print(f"{action.classification}: {action.path.as_posix()} ({action.reason})")
 
@@ -447,14 +518,14 @@ def main() -> int:
         print("Refusing to apply because ownership conflicts require manual resolution.", file=sys.stderr)
         return 2
     if args.mode == "apply":
-        apply(target, writes, delete_obsolete, project_name)
-        print(f"Applied Agentic SDLC {plugin_version()} to {target}")
+        apply(target, writes, delete_paths, project_name)
+        print(f"Applied Pleiad {plugin_version()} to {target}")
         return 0
     if args.mode == "check" and changes:
         print(f"Drift detected: {len(changes)} managed change(s) required.", file=sys.stderr)
         return 1
     if args.mode == "check":
-        print(f"Agentic SDLC {plugin_version()} state is current.")
+        print(f"Pleiad {plugin_version()} state is current.")
     return 0
 
 

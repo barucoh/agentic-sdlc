@@ -21,7 +21,7 @@ for (const file of files) {
 }
 if (!blocks.length) throw new Error("No committed Mermaid blocks found");
 
-const temporary = mkdtempSync(join(tmpdir(), "agentic-sdlc-mermaid-"));
+const temporary = mkdtempSync(join(tmpdir(), "pleiad-mermaid-"));
 // Run the pinned package entry with this exact Node runtime.  Calling the
 // platform shim requires shell spawning on Windows and emits deprecation
 // warnings; the package's JavaScript entry is portable without a shell.

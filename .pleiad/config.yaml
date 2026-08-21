@@ -1,0 +1,46 @@
+schema_version: 2
+project_name: "Pleiad"
+applied_plugin_version: 1.0.0
+release_channel: stable
+session_title_format: "#{issue_number} {role_code} - {issue_title}"
+session_title_max_characters: 36
+role_codes:
+  coordinator: CO
+  product: PD
+  architecture: AR
+  implementation: IM
+  qa: QA
+  reviewer: RV
+  knowledge_steward: KS
+routing_policy: repository-native-v1
+routing_matrix:
+  coordinator: "gpt-5.6-sol/Medium"
+  product: "gpt-5.6-sol/Medium"
+  architecture: "gpt-5.6-sol/Medium"
+  implementation: "gpt-5.6-luna/Low|gpt-5.6-terra/Low..High"
+  qa: "gpt-5.6-sol/Medium|High-with-risk-rationale"
+  reviewer: "gpt-5.6-sol/Medium|High-with-risk-rationale"
+  knowledge_steward: "gpt-5.6-luna/Low|gpt-5.6-sol/Medium-with-decision-rationale"
+  ephemeral_research: "gpt-5.6-luna/Low|gpt-5.6-terra/Low|gpt-5.6-sol/exceptional-rationale"
+lifecycle_policy: delivery-cell-v1
+lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"
+lifecycle_transport_overlay: per-recipient DELIVERY_UNKNOWN
+delivery_topology: one-issue-one-cell-one-implementation-worktree-branch-one-pr
+qa_workspace_topology: host-provisioned-isolated-clone
+qa_workspace_check: scripts/qa_workspace.py
+bootstrap_exception: false
+handoff_schema_version: 1.0.0
+handoff_schema_path: .pleiad/handoff.schema.json
+coordination_contract_path: docs/pleiad/coordination.md
+role_contracts_path: docs/pleiad/role-contracts.md
+durable_delivery: issue-task-worktree-branch-pr
+ephemeral_subagents: bounded-read-only-research-only
+cross_task_watchdog_seconds: 25
+roles:
+  - coordinator
+  - product
+  - architecture
+  - implementation
+  - qa
+  - reviewer
+  - knowledge_steward
