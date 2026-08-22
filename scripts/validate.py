@@ -27,13 +27,13 @@ except Exception as exc:
     errors.append(f"invalid plugin manifest: {exc}")
     manifest = {}
 
-if manifest.get("name") != "agentic-sdlc":
-    errors.append("plugin name must be agentic-sdlc")
+if manifest.get("name") != "pleiad":
+    errors.append("plugin name must be pleiad")
 if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?", str(manifest.get("version", ""))):
     errors.append("plugin version must be SemVer")
 
 skills = sorted((ROOT / "skills").glob("*/SKILL.md"))
-required = {"bootstrap-agentic-sdlc", "adr-context", "upgrade-agentic-sdlc", "coordinate-agentic-sdlc"}
+required = {"bootstrap-pleiad", "adr-context", "upgrade-pleiad", "coordinate-pleiad"}
 found = {p.parent.name for p in skills}
 missing = required - found
 if missing:
@@ -47,12 +47,12 @@ for skill in skills:
         errors.append(f"placeholder remains: {skill.relative_to(ROOT)}")
 
 required_files = [
-    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/AGENTS.md",
-    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/docs/decisions/INDEX.md",
+    ROOT / "skills/bootstrap-pleiad/assets/repository/AGENTS.md",
+    ROOT / "skills/bootstrap-pleiad/assets/repository/docs/decisions/INDEX.md",
     ROOT / "docs/installation.md",
     ROOT / "docs/upgrading.md",
-    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/handoff.schema.json",
-    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/handoff-template.json",
+    ROOT / "skills/bootstrap-pleiad/assets/repository/.pleiad/handoff.schema.json",
+    ROOT / "skills/bootstrap-pleiad/assets/repository/.pleiad/handoff-template.json",
     ROOT / "scripts/manage_repository.py",
     ROOT / "scripts/coordination_protocol.py",
     ROOT / "scripts/pretool_handoff_guard.py",
@@ -60,10 +60,10 @@ required_files = [
     ROOT / ".codex/hooks.json",
     ROOT / "scripts/qa_workspace.py",
     ROOT / "scripts/validate_hooks.py",
-    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.codex/hooks.json",
-    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/scripts/pretool_handoff_guard.py",
-    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/scripts/validate_hooks.py",
-    ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/docs/agentic-sdlc/hooks.md",
+    ROOT / "skills/bootstrap-pleiad/assets/repository/.codex/hooks.json",
+    ROOT / "skills/bootstrap-pleiad/assets/repository/scripts/pretool_handoff_guard.py",
+    ROOT / "skills/bootstrap-pleiad/assets/repository/scripts/validate_hooks.py",
+    ROOT / "skills/bootstrap-pleiad/assets/repository/docs/pleiad/hooks.md",
 ]
 for path in required_files:
     if not path.is_file():
@@ -71,7 +71,7 @@ for path in required_files:
 if (ROOT / "hooks").is_dir() and any((ROOT / "hooks").iterdir()):
     errors.append("plugin must not bundle an automatically discovered hooks directory")
 
-config = (ROOT / ".agentic-sdlc/config.yaml").read_text(encoding="utf-8")
+config = (ROOT / ".pleiad/config.yaml").read_text(encoding="utf-8")
 errors.extend(f"invalid self-hosted session-title config: {error}" for error in validate_session_title_config(config))
 if "bootstrap_exception: false" in config and "applied_plugin_version: bootstrap" in config:
     errors.append("non-bootstrap configuration cannot use bootstrap version")
@@ -83,7 +83,7 @@ if applied_version != "bootstrap" and applied_version != manifest.get("version")
     errors.append("self-hosted applied version must match the plugin manifest")
 
 if "schema_version: 2" not in config:
-    errors.append("self-hosted repository must use Agentic SDLC schema 2")
+    errors.append("self-hosted repository must use Pleiad schema 2")
 
 expected_roles = {
     "coordinator",
@@ -94,7 +94,7 @@ expected_roles = {
     "reviewer",
     "knowledge_steward",
 }
-template_root = ROOT / "skills/bootstrap-agentic-sdlc/assets/repository"
+template_root = ROOT / "skills/bootstrap-pleiad/assets/repository"
 agent_root = template_root / ".codex/agents"
 role_names = set()
 contract_sections = (
@@ -156,8 +156,8 @@ for relative in subprocess.run(["git", "ls-files"], cwd=ROOT, check=True, captur
     except UnicodeDecodeError:
         continue
 
-schema_path = template_root / ".agentic-sdlc/handoff.schema.json"
-template_path = template_root / ".agentic-sdlc/handoff-template.json"
+schema_path = template_root / ".pleiad/handoff.schema.json"
+template_path = template_root / ".pleiad/handoff-template.json"
 try:
     handoff_schema = json.loads(schema_path.read_text(encoding="utf-8"))
     handoff_template = json.loads(template_path.read_text(encoding="utf-8"))
@@ -179,7 +179,7 @@ if hook_validation.returncode:
     errors.append("native task-boundary hook validation failed: " + hook_validation.stderr.strip())
 
 try:
-    state_actions, _, _ = manage_repository.plan(ROOT, "Agentic SDLC")
+    state_actions, _, _ = manage_repository.plan(ROOT, "Pleiad")
     drift = [
         action
         for action in state_actions
@@ -195,4 +195,4 @@ if errors:
     for error in errors:
         print(f"- {error}")
     sys.exit(1)
-print(f"Validated agentic-sdlc {manifest['version']} with {len(skills)} skills")
+print(f"Validated pleiad {manifest['version']} with {len(skills)} skills")

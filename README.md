@@ -1,8 +1,8 @@
-# Agentic SDLC
+# Pleiad
 
-A public Codex plugin for repository-native, issue-driven software delivery.
+Pleiad is an **Agentic SDLC**: a public Codex plugin for repository-native, issue-driven software delivery. Its name is new; the product category and methodology are unchanged.
 
-Agentic SDLC installs reusable workflows while keeping project knowledge in the repository. It provides complete role contracts, versioned structured handoffs, resilient cross-task recovery, selective ADR discovery, deterministic upgrades, and a one issue = one delivery cell = one writable Implementation worktree/branch = one PR model; QA and Reviewer use distinct subordinate, non-authoritative tasks/workspaces.
+Pleiad installs reusable workflows while keeping project knowledge in the repository. It provides complete role contracts, versioned structured handoffs, resilient cross-task recovery, selective ADR discovery, deterministic upgrades, and a one issue = one delivery cell = one writable Implementation worktree/branch = one PR model; QA and Reviewer use distinct subordinate, non-authoritative tasks/workspaces.
 
 ## Install during development
 
@@ -10,16 +10,16 @@ See [installation](docs/installation.md) for local and version-pinned Git-backed
 
 ## Use
 
-- Invoke `bootstrap-agentic-sdlc` in a repository that has not adopted the workflow.
-- Invoke `coordinate-agentic-sdlc` to route durable role work, read-only research, corrections, or uncertain cross-task delivery.
+- Invoke `bootstrap-pleiad` in a repository that has not adopted the workflow.
+- Invoke `coordinate-pleiad` to route durable role work, read-only research, corrections, or uncertain cross-task delivery.
 - Invoke `adr-context` when a task may be constrained by architectural decisions.
-- Invoke `upgrade-agentic-sdlc` after installing a newer plugin release.
+- Invoke `upgrade-pleiad` after installing a newer plugin release.
 
 Bootstrap and upgrade always inspect first, report a deterministic dry run, preserve project-owned content, stop on managed drift or ambiguous ownership, and require explicit approval before repository writes. Apply is idempotent and followed by a drift check.
 
 See [upgrading](docs/upgrading.md) for the two-layer plugin and repository migration model.
 
-See the managed [coordination policy](docs/agentic-sdlc/coordination.md), [role contracts](docs/agentic-sdlc/role-contracts.md), and [native task-boundary hook guardrails](docs/agentic-sdlc/hooks.md) for the native delivery-cell model: Coordinator supervises a dedicated Implementation, QA, and Reviewer cell while GitHub remains the durable authority.
+See the managed [coordination policy](docs/pleiad/coordination.md), [role contracts](docs/pleiad/role-contracts.md), and [native task-boundary hook guardrails](docs/pleiad/hooks.md) for the native delivery-cell model: Coordinator supervises a dedicated Implementation, QA, and Reviewer cell while GitHub remains the durable authority.
 
 ## Development
 
@@ -34,4 +34,4 @@ Pull requests target `main`. Only the repository owner may merge. Versions are s
 
 ## Self-hosting
 
-This repository dogfoods Agentic SDLC. Release pull requests update both the plugin manifest and the repository's applied version; only the owner may merge, and the matching stable release is then published automatically.
+This repository dogfoods Pleiad. Release pull requests update both the plugin manifest and the repository's applied version; only the owner may merge, and the matching stable release is then published automatically.

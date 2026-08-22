@@ -53,7 +53,7 @@ EXPECTED_ROLES = {
 
 class RoleContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.roles = ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.codex/agents"
+        self.roles = ROOT / "skills/bootstrap-pleiad/assets/repository/.codex/agents"
 
     def test_current_codex_agent_configuration_and_contract_completeness(self) -> None:
         found = set()
@@ -152,7 +152,7 @@ class SessionTitleTests(unittest.TestCase):
             session_title_for_role(5, "unknown_role", "Issue title")
 
     def test_managed_config_matches_executable_title_authority(self) -> None:
-        config_path = ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/config.yaml"
+        config_path = ROOT / "skills/bootstrap-pleiad/assets/repository/.pleiad/config.yaml"
         config = config_path.read_text(encoding="utf-8")
         self.assertEqual(validate_session_title_config(config), [])
         invalid = config.replace("  reviewer: RV", "  reviewer: XX")
@@ -207,7 +207,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
 
     def handoff(self) -> dict:
         return json.loads(
-            (ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/handoff-template.json").read_text(
+            (ROOT / "skills/bootstrap-pleiad/assets/repository/.pleiad/handoff-template.json").read_text(
                 encoding="utf-8"
             )
         )
@@ -277,17 +277,21 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertNotIn("hooks", json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8")))
         self.assertFalse(any((ROOT / "hooks").iterdir()) if (ROOT / "hooks").is_dir() else False, "the plugin must not register hooks outside an adopted repository")
         guard = ROOT / "scripts/pretool_handoff_guard.py"
-        valid_event = {"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(self.handoff())}}
+        valid_event = {"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(self.handoff())}}
         allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(valid_event), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(allowed.returncode, 0)
         self.assertEqual(allowed.stdout.strip(), "")
+        legacy_event = {"tool_name": "codex_app__create_thread", "tool_input": {"metadata": {"agentic_sdlc_handoff": self.handoff()}}}
+        legacy_allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(legacy_event), text=True, capture_output=True, cwd=ROOT, check=False)
+        self.assertEqual(legacy_allowed.returncode, 0)
+        self.assertEqual(legacy_allowed.stdout.strip(), "")
         invalid = self.handoff()
         invalid["objective"] = ""
         denied = subprocess.run([sys.executable, str(guard)], input=json.dumps({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"metadata": {"handoff": invalid}}}), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(denied.returncode, 0)
         decision = json.loads(denied.stdout)["hookSpecificOutput"]
         self.assertEqual(decision["permissionDecision"], "deny")
-        self.assertIn("ASDLC_HANDOFF_INVALID", decision["permissionDecisionReason"])
+        self.assertIn("PLEIAD_HANDOFF_INVALID", decision["permissionDecisionReason"])
         self.assertIn("no task/message was created", decision["permissionDecisionReason"])
         self.assertEqual(subprocess.run([sys.executable, str(ROOT / "scripts/validate_hooks.py")], text=True, capture_output=True, check=False).returncode, 0)
 
@@ -299,7 +303,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertFalse((temporary / ".codex/hooks.json").exists())
         probe = {
             "tool_name": "codex_app__create_thread",
-            "tool_input": {"prompt": "ASDLC_HANDOFF: {\"schema_version\": \"1.0.0\"}"},
+            "tool_input": {"prompt": "PLEIAD_HANDOFF: {\"schema_version\": \"1.0.0\"}"},
         }
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/pretool_handoff_guard.py")],
@@ -313,7 +317,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "")
 
     def test_qa_workspace_is_disposable_and_source_immutable(self) -> None:
-        contract = tomllib.loads((ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.codex/agents/qa.toml").read_text(encoding="utf-8"))["developer_instructions"].lower()
+        contract = tomllib.loads((ROOT / "skills/bootstrap-pleiad/assets/repository/.codex/agents/qa.toml").read_text(encoding="utf-8"))["developer_instructions"].lower()
         self.assertIn("isolated disposable qa clone", contract)
         self.assertIn("behavioral tools may create caches/build/test outputs", contract)
         self.assertIn("source mutation", contract)
@@ -583,7 +587,7 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             except UnicodeDecodeError:
                 pass
         self.assertEqual(matches, [])
-        coordination = (ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/docs/agentic-sdlc/coordination.md").read_text(encoding="utf-8")
+        coordination = (ROOT / "skills/bootstrap-pleiad/assets/repository/docs/pleiad/coordination.md").read_text(encoding="utf-8")
         self.assertIn("KS Knowledge Steward", coordination)
         self.assertIn("flowchart", coordination)
         self.assertIn("stateDiagram-v2", coordination)
@@ -910,10 +914,10 @@ class HandoffAndCoordinationTests(unittest.TestCase):
 
     def test_durable_routing_and_watchdog_policy(self) -> None:
         coordination = (
-            ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/docs/agentic-sdlc/coordination.md"
+            ROOT / "skills/bootstrap-pleiad/assets/repository/docs/pleiad/coordination.md"
         ).read_text(encoding="utf-8")
         config = (
-            ROOT / "skills/bootstrap-agentic-sdlc/assets/repository/.agentic-sdlc/config.yaml"
+            ROOT / "skills/bootstrap-pleiad/assets/repository/.pleiad/config.yaml"
         ).read_text(encoding="utf-8")
         for risk_class in ("file-producing", "durable-artifact-producing", "decision-heavy", "release", "high-importance", "risk-bearing"):
             self.assertIn(risk_class, coordination)
@@ -930,6 +934,37 @@ class RepositoryStateTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, temporary)
         target = temporary / name
         shutil.copytree(ROOT / "tests/fixtures" / name, target)
+        return target
+
+    def v0_3_repository(self) -> Path:
+        """Build a pristine old-identity managed repository from the v1 templates."""
+        temporary = ROOT / "tests" / ".tmp" / str(uuid4())
+        temporary.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, temporary)
+        target = temporary / "legacy"
+        target.mkdir()
+        project_name = "Legacy Repository"
+        files: dict[str, str] = {}
+        for relative in manage_repository.MANAGED_PATHS:
+            old_relative = manage_repository.legacy_path(relative)
+            content = manage_repository.template_text(relative, project_name)
+            content = content.replace("pleiad", "agentic-sdlc").replace("Pleiad", "Agentic SDLC").replace("applied_plugin_version: 1.0.0", "applied_plugin_version: 0.3.0")
+            path = target / old_relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            files[old_relative.as_posix()] = manage_repository.digest_bytes(content.encode("utf-8"))
+        agents = manage_repository.desired_agents_text().replace("pleiad", "agentic-sdlc").replace("Pleiad", "Agentic SDLC")
+        (target / "AGENTS.md").write_text(agents, encoding="utf-8")
+        legacy_manifest = {
+            "schema_version": 2,
+            "plugin_version": "0.3.0",
+            "project_name": project_name,
+            "files": files,
+            "managed_blocks": {"AGENTS.md": manage_repository.digest_bytes(agents.encode("utf-8"))},
+        }
+        manifest_path = target / manage_repository.LEGACY_MANIFEST_PATH
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(legacy_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return target
 
     def qa_repository(self) -> tuple[Path, str]:
@@ -1138,13 +1173,48 @@ class RepositoryStateTests(unittest.TestCase):
             "scripts/qa_workspace.py",
         ):
             self.assertTrue((target / relative).is_file(), relative)
-        config = (target / ".agentic-sdlc/config.yaml").read_text(encoding="utf-8")
+        config = (target / ".pleiad/config.yaml").read_text(encoding="utf-8")
         self.assertIn('project_name: "Legacy Fixture"', config)
         self.assertIn('session_title_format: "#{issue_number} {role_code} - {issue_title}"', config)
         self.assertIn("routing_policy: repository-native-v1", config)
         self.assertNotIn("{project_name} #{issue_number}", config)
         again, _, _ = manage_repository.plan(target, "Legacy Fixture")
         self.assertFalse([a for a in again if a.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
+
+    def test_v0_3_identity_migration_is_safe_and_idempotent(self) -> None:
+        target = self.v0_3_repository()
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/manage_repository.py"), "apply", "--target", str(target)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("delete: .agentic-sdlc/managed.json", result.stdout)
+        self.assertFalse((target / ".agentic-sdlc").exists())
+        self.assertFalse((target / "docs/agentic-sdlc").exists())
+        self.assertTrue((target / ".pleiad/managed.json").is_file())
+        self.assertIn('project_name: "Legacy Repository"', (target / ".pleiad/config.yaml").read_text(encoding="utf-8"))
+        again, _, _ = manage_repository.plan(target, "Legacy Repository")
+        self.assertFalse([a for a in again if a.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
+
+    def test_v0_3_identity_migration_rejects_conflicting_explicit_project_name(self) -> None:
+        target = self.v0_3_repository()
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/manage_repository.py"), "dry-run", "--target", str(target), "--project-name", "Wrong Name"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("legacy project_name conflicts", result.stdout)
+
+    def test_v0_3_identity_migration_rejects_stale_managed_content(self) -> None:
+        target = self.v0_3_repository()
+        legacy_file = target / ".codex/agents/product.toml"
+        legacy_file.write_text(legacy_file.read_text(encoding="utf-8") + "\n# customization\n", encoding="utf-8")
+        actions, _, _ = manage_repository.plan(target, "Legacy Repository")
+        self.assertIn(("conflict", ".agentic-sdlc/managed.json"), {(a.classification, a.path.as_posix()) for a in actions})
 
     def test_fresh_bootstrap_installs_runtime_cli_and_blocks_invalid_dispatch(self) -> None:
         temporary = ROOT / "tests" / ".tmp" / str(uuid4())
@@ -1165,7 +1235,7 @@ class RepositoryStateTests(unittest.TestCase):
             "scripts/qa_workspace.py",
         ):
             self.assertTrue((target / relative).is_file(), relative)
-        handoff_path = target / ".agentic-sdlc/handoff-template.json"
+        handoff_path = target / ".pleiad/handoff-template.json"
         valid = json.loads(handoff_path.read_text(encoding="utf-8"))
         cli = target / "scripts/validate_handoff.py"
         accepted = subprocess.run([sys.executable, str(cli)], input=json.dumps(valid), text=True, capture_output=True, cwd=target, check=False)
@@ -1220,7 +1290,7 @@ class RepositoryStateTests(unittest.TestCase):
 
     def test_manifest_v1_migrates_project_hook_assets_without_conflict(self) -> None:
         target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
-        manifest_path = target / ".agentic-sdlc/managed.json"
+        manifest_path = target / ".pleiad/managed.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         hook_assets = {".codex/hooks.json", "scripts/pretool_handoff_guard.py", "scripts/validate_hooks.py"}
         manifest["schema_version"] = 1
@@ -1238,7 +1308,7 @@ class RepositoryStateTests(unittest.TestCase):
 
     def test_windows_crlf_noop_apply_preserves_managed_manifest_bytes(self) -> None:
         target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
-        manifest = target / ".agentic-sdlc/managed.json"
+        manifest = target / ".pleiad/managed.json"
         crlf = manifest.read_bytes().replace(b"\n", b"\r\n")
         manifest.write_bytes(crlf)
         actions, writes, obsolete = manage_repository.plan(target, "Customized Fixture")
@@ -1274,12 +1344,12 @@ class RepositoryStateTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertIn("conflict: .agentic-sdlc/managed.json", result.stdout)
+        self.assertIn("conflict: .pleiad/managed.json", result.stdout)
         self.assertIn(reason_fragment, result.stdout)
 
     def test_manifest_plugin_version_drift_is_a_conflict(self) -> None:
         target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
-        manifest_path = target / ".agentic-sdlc/managed.json"
+        manifest_path = target / ".pleiad/managed.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["plugin_version"] = "99.0.0"
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1287,7 +1357,7 @@ class RepositoryStateTests(unittest.TestCase):
 
     def test_manifest_false_managed_file_hash_is_a_conflict(self) -> None:
         target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
-        manifest_path = target / ".agentic-sdlc/managed.json"
+        manifest_path = target / ".pleiad/managed.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["files"][".codex/agents/product.toml"] = "0" * 64
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1295,14 +1365,14 @@ class RepositoryStateTests(unittest.TestCase):
 
     def test_missing_manifest_is_reported_as_drift(self) -> None:
         target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
-        (target / ".agentic-sdlc/managed.json").unlink()
+        (target / ".pleiad/managed.json").unlink()
         result = subprocess.run(
             [sys.executable, str(ROOT / "scripts/manage_repository.py"), "check", "--target", str(target)],
             capture_output=True,
             text=True,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("create: .agentic-sdlc/managed.json", result.stdout)
+        self.assertIn("create: .pleiad/managed.json", result.stdout)
 
 
 if __name__ == "__main__":
