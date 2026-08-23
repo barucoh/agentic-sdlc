@@ -1,4 +1,4 @@
-# Pleiad
+# Pleiad (pronounced PLEE-ad)
 
 Pleiad is an **Agentic SDLC**: a public Codex plugin for repository-native, issue-driven software delivery. Its name is new; the product category and methodology are unchanged.
 
