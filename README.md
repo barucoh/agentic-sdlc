@@ -1,6 +1,6 @@
-# Pleiad (pronounced PLEE-ad)
+# Pleiad
 
-Pleiad is an **Agentic SDLC**: a public Codex plugin for repository-native, issue-driven software delivery. Its name is new; the product category and methodology are unchanged.
+Pleiad (pronounced PLEE-ad) is an **Agentic SDLC**: a public Codex plugin for repository-native, issue-driven software delivery. Its name is new; the product category and methodology are unchanged.
 
 Pleiad installs reusable workflows while keeping project knowledge in the repository. It provides complete role contracts, versioned structured handoffs, resilient cross-task recovery, selective ADR discovery, deterministic upgrades, and a one issue = one delivery cell = one writable Implementation worktree/branch = one PR model; QA and Reviewer use distinct subordinate, non-authoritative tasks/workspaces.
 
