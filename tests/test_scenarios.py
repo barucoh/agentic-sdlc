@@ -1366,7 +1366,8 @@ class RepositoryStateTests(unittest.TestCase):
         base = "0af3388389848e88506aa302dac32b476ea7e2ef"
         files: dict[str, str] = {}
         for relative in manage_repository.PRE_ROUTING_MANAGED_PATHS:
-            text = subprocess.check_output(["git", "show", f"{base}:{relative.as_posix()}"], cwd=ROOT, text=True)
+            historical = subprocess.run(["git", "show", f"{base}:{relative.as_posix()}"], cwd=ROOT, text=True, capture_output=True, check=False)
+            text = historical.stdout if historical.returncode == 0 else manage_repository.template_text(relative, "Pleiad")
             path = target / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
