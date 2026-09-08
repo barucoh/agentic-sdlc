@@ -38,6 +38,7 @@ from coordination_protocol import (  # noqa: E402
 )
 from qa_workspace import WorkspaceSnapshot, capture_snapshot, verify_qa_workspace  # noqa: E402
 import manage_repository  # noqa: E402
+from check_latest_release import validate_release_transition  # noqa: E402
 
 
 EXPECTED_ROLES = {
@@ -49,6 +50,23 @@ EXPECTED_ROLES = {
     "reviewer",
     "knowledge_steward",
 }
+
+
+class ReleasePolicyTests(unittest.TestCase):
+    def test_relaunch_and_single_patch_increments_are_allowed(self) -> None:
+        validate_release_transition("0.1.0", "1.0.0")
+        validate_release_transition("0.1.1", "0.1.0")
+        validate_release_transition("0.1.1", "0.1.1")
+
+    def test_missing_release_requires_relaunch_version(self) -> None:
+        validate_release_transition("0.1.0", None)
+        with self.assertRaisesRegex(ValueError, "first Pleiad release must be 0.1.0"):
+            validate_release_transition("0.1.1", None)
+
+    def test_minor_major_and_skipped_patch_increments_are_rejected(self) -> None:
+        for candidate in ("0.1.2", "0.2.0", "1.0.1"):
+            with self.subTest(candidate=candidate), self.assertRaises(ValueError):
+                validate_release_transition(candidate, "0.1.0")
 
 
 class RoleContractTests(unittest.TestCase):
@@ -937,7 +955,7 @@ class RepositoryStateTests(unittest.TestCase):
         return target
 
     def v0_3_repository(self) -> Path:
-        """Build a pristine old-identity managed repository from the v1 templates."""
+        """Build a pristine old-identity managed repository from the current templates."""
         temporary = ROOT / "tests" / ".tmp" / str(uuid4())
         temporary.mkdir(parents=True)
         self.addCleanup(shutil.rmtree, temporary)
@@ -948,7 +966,7 @@ class RepositoryStateTests(unittest.TestCase):
         for relative in manage_repository.MANAGED_PATHS:
             old_relative = manage_repository.legacy_path(relative)
             content = manage_repository.template_text(relative, project_name)
-            content = content.replace("pleiad", "agentic-sdlc").replace("Pleiad", "Agentic SDLC").replace("applied_plugin_version: 1.0.0", "applied_plugin_version: 0.3.0")
+            content = content.replace("pleiad", "agentic-sdlc").replace("Pleiad", "Agentic SDLC").replace("applied_plugin_version: 0.1.0", "applied_plugin_version: 0.3.0")
             path = target / old_relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")

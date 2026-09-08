@@ -30,7 +30,7 @@ python scripts/validate.py
 python -m unittest discover -s tests -v
 ```
 
-Pull requests target `main`. Only the repository owner may merge. Versions are sourced from `.codex-plugin/plugin.json`; merging a previously unreleased version to `main` creates the corresponding GitHub release.
+Pull requests target `main`. Only the repository owner may merge. Versions are sourced from `.codex-plugin/plugin.json`; merging a previously unreleased version to `main` creates the corresponding GitHub release. Pleiad starts at `0.1.0` and advances through deliberately small patch releases (`0.1.1`, `0.1.2`, and so on); changing the minor or major component requires explicit repository-owner direction.
 
 ## Self-hosting
 

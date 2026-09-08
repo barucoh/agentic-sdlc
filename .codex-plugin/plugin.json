@@ -1,6 +1,6 @@
 {
   "name": "pleiad",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Pleiad is an Agentic SDLC for resilient, repository-native, issue-driven delivery in Codex.",
   "author": {
     "name": "barucoh",

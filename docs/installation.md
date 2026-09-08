@@ -34,7 +34,7 @@ A team marketplace can point at a stable tag instead of a local checkout:
     "source": {
       "source": "url",
       "url": "https://github.com/barucoh/pleiad.git",
-      "ref": "v1.0.0"
+      "ref": "v0.1.0"
     },
     "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
     "category": "Productivity"

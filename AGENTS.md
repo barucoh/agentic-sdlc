@@ -7,6 +7,7 @@
 - Run `python scripts/validate.py` before publishing changes.
 - Treat `.codex-plugin/plugin.json` as the release-version authority.
 - Do not change the version unless the pull request is intended to produce a release.
+- Keep pre-1.0 releases on the `0.1.x` line and increment only the patch component unless `barucoh` explicitly directs a minor or major change.
 - Until the first release exists, repository-source development is the documented bootstrap exception. Afterwards use the latest stable Pleiad release.
 
 <!-- pleiad:start -->
