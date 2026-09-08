@@ -16,6 +16,7 @@ from coordination_protocol import (
     ROLE_CODES,
     format_session_title,
     validate_handoff,
+    validate_routing_policy,
     validate_session_title_config,
 )
 
@@ -47,6 +48,7 @@ MANAGED_PATHS = tuple(
         ".codex/agents/qa.toml",
         ".codex/agents/reviewer.toml",
         "scripts/coordination_protocol.py",
+        "scripts/configure_routing.py",
         "scripts/pretool_handoff_guard.py",
         "scripts/validate_handoff.py",
         "scripts/validate_hooks.py",
@@ -56,10 +58,12 @@ MANAGED_PATHS = tuple(
         "docs/pleiad/role-contracts.md",
     )
 )
+PRE_ROUTING_MANAGED_PATHS = frozenset(MANAGED_PATHS) - {Path("scripts/configure_routing.py")}
 MANIFEST_V1_MANAGED_PATHS = frozenset(
     frozenset(MANAGED_PATHS)
     - {
         Path(".codex/hooks.json"),
+        Path("scripts/configure_routing.py"),
         Path("scripts/pretool_handoff_guard.py"),
         Path("scripts/validate_hooks.py"),
     }
@@ -69,6 +73,7 @@ CREATE_IF_MISSING = (
     Path("docs/decisions/ADR-TEMPLATE.md"),
 )
 OBSOLETE_REGISTRY = Path(".codex/config.toml")
+ROUTING_OVERRIDE_PATH = Path(".pleiad/model-routing.json")
 LEGACY_HASHES = {
     Path(".codex/config.toml"): "6603ea8df47e0781dabe7315cc09a43c490acbbfa7b4cd906d3b045f1e01f737",
     Path(".codex/agents/coordinator.toml"): "7a7efde0a6ccf1856f8ca36511e133d68eb749d66af632810812965d65366e43",
@@ -208,7 +213,13 @@ def manifest_validation_errors(target: Path, installed: dict, project_name: str)
 
     files = installed.get("files")
     expected_paths = {relative.as_posix() for relative in MANAGED_PATHS}
-    recorded_paths = {relative.as_posix() for relative in (MANIFEST_V1_MANAGED_PATHS if is_v1 else MANAGED_PATHS)}
+    recorded_set = (
+        MANIFEST_V1_MANAGED_PATHS
+        if is_v1
+        else PRE_ROUTING_MANAGED_PATHS if isinstance(files, dict) and set(files) == {path.as_posix() for path in PRE_ROUTING_MANAGED_PATHS}
+        else frozenset(MANAGED_PATHS)
+    )
+    recorded_paths = {relative.as_posix() for relative in recorded_set}
     if not isinstance(files, dict):
         errors.append("managed-state files must be an object")
     else:
@@ -222,7 +233,10 @@ def manifest_validation_errors(target: Path, installed: dict, project_name: str)
             destination = target / Path(relative_text)
             if not destination.is_file():
                 errors.append(f"managed-state path is missing: {relative_text}")
-            elif digest_path(destination) != recorded:
+            elif digest_path(destination) != recorded and not (
+                target.resolve() == ROOT.resolve()
+                and destination.read_text(encoding="utf-8") == template_text(Path(relative_text), project_name)
+            ):
                 errors.append(f"managed-state hash does not match {relative_text}")
 
     blocks = installed.get("managed_blocks")
@@ -362,7 +376,18 @@ def merge_agents(existing: str, block: str) -> tuple[str | None, str]:
     return existing + separator + block + "\n", "managed block append"
 
 
-def plan(target: Path, project_name: str) -> tuple[list[Action], dict[Path, str], list[str]]:
+def requested_routing_policy(path: Path | None) -> tuple[str | None, list[str]]:
+    if path is None:
+        return None, []
+    try:
+        policy = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, [f"routing policy {path} is not valid JSON: {exc}"]
+    errors = validate_routing_policy(policy)
+    return (json.dumps(policy, indent=2, sort_keys=True) + "\n" if not errors else None), errors
+
+
+def plan(target: Path, project_name: str, routing_policy: Path | None = None) -> tuple[list[Action], dict[Path, str], list[str]]:
     installed = load_installed_manifest(target)
     legacy: dict | None = None
     actions: list[Action] = []
@@ -388,6 +413,9 @@ def plan(target: Path, project_name: str) -> tuple[list[Action], dict[Path, str]
                 delete_paths.append(LEGACY_MANIFEST_PATH.as_posix())
     for error in template_validation_errors(project_name):
         actions.append(Action("conflict", Path(".pleiad"), f"invalid release template: {error}"))
+    requested_policy, policy_errors = requested_routing_policy(routing_policy)
+    for error in policy_errors:
+        actions.append(Action("conflict", ROUTING_OVERRIDE_PATH, error))
     manifest_path = target / MANIFEST_PATH
     manifest_errors = manifest_validation_errors(target, installed, project_name)
     for error in manifest_errors:
@@ -432,6 +460,16 @@ def plan(target: Path, project_name: str) -> tuple[list[Action], dict[Path, str]
         else:
             actions.append(Action("create", relative, "missing create-if-missing file"))
             writes[relative] = template_text(relative, project_name)
+
+    if requested_policy is not None:
+        destination = target / ROUTING_OVERRIDE_PATH
+        if not destination.exists():
+            actions.append(Action("create", ROUTING_OVERRIDE_PATH, "validated project-owned bootstrap routing policy"))
+            writes[ROUTING_OVERRIDE_PATH] = requested_policy
+        elif destination.read_text(encoding="utf-8") == requested_policy:
+            actions.append(Action("unchanged", ROUTING_OVERRIDE_PATH, "matches requested project-owned routing policy"))
+        else:
+            actions.append(Action("conflict", ROUTING_OVERRIDE_PATH, "project-owned routing policy already exists; use configure-pleiad"))
 
     obsolete = target / OBSOLETE_REGISTRY
     delete_obsolete: str | None = None
@@ -503,6 +541,7 @@ def main() -> int:
     parser.add_argument("mode", choices=("dry-run", "apply", "check"))
     parser.add_argument("--target", type=Path, default=Path.cwd())
     parser.add_argument("--project-name")
+    parser.add_argument("--routing-policy", type=Path, help="optional complete JSON policy for initial bootstrap only")
     args = parser.parse_args()
 
     target = args.target.resolve()
@@ -514,7 +553,7 @@ def main() -> int:
         or configured_legacy_project_name(target)
         or target.name.replace("-", " ").replace("_", " ").title()
     )
-    actions, writes, delete_paths = plan(target, project_name)
+    actions, writes, delete_paths = plan(target, project_name, args.routing_policy)
     for action in actions:
         print(f"{action.classification}: {action.path.as_posix()} ({action.reason})")
 

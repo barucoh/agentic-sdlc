@@ -42,9 +42,9 @@ def is_pleiad_project(root: Path) -> bool:
 
 def canonical_validator(root: Path):
     sys.path.insert(0, str(root / "scripts"))
-    from coordination_protocol import validate_handoff  # noqa: PLC0415
+    from coordination_protocol import resolve_routing_defaults, validate_handoff, validate_host_availability  # noqa: PLC0415
 
-    return validate_handoff
+    return resolve_routing_defaults, validate_handoff, validate_host_availability
 
 
 def _json_object(text: str) -> dict[str, Any] | None:
@@ -115,7 +115,18 @@ def evaluate(event: dict[str, Any], root: Path | None = None) -> dict[str, Any] 
     envelope = extract_envelope(event.get("tool_input"))
     if envelope is None:
         return denial(["missing versioned Pleiad envelope in tool_input prompt or metadata"])
-    errors = canonical_validator(resolved_root)(envelope)
+    _, validate, _ = canonical_validator(resolved_root)
+    # The hook observes the envelope already placed in the native prompt or
+    # metadata; it cannot rewrite that transport payload.  Defaults are
+    # materialized by the pre-dispatch helper before its callback, while this
+    # boundary must insist that the on-wire envelope is already schema-valid.
+    errors = validate(envelope)
+    tool_input = event.get("tool_input")
+    if not errors:
+        expected_model = envelope["target_model"]
+        expected_effort = envelope["effort"].lower()
+        if not isinstance(tool_input, dict) or tool_input.get("model") != expected_model or tool_input.get("thinking") != expected_effort:
+            errors = ["native tool model and thinking must explicitly match the resolved routing policy before dispatch"]
     return denial(errors) if errors else None
 
 

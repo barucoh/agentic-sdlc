@@ -12,16 +12,9 @@ role_codes:
   qa: QA
   reviewer: RV
   knowledge_steward: KS
-routing_policy: repository-native-v1
-routing_matrix:
-  coordinator: "gpt-5.6-sol/Medium"
-  product: "gpt-5.6-sol/Medium"
-  architecture: "gpt-5.6-sol/Medium"
-  implementation: "gpt-5.6-luna/Low|gpt-5.6-terra/Low..High"
-  qa: "gpt-5.6-sol/Medium|High-with-risk-rationale"
-  reviewer: "gpt-5.6-sol/Medium|High-with-risk-rationale"
-  knowledge_steward: "gpt-5.6-luna/Low|gpt-5.6-sol/Medium-with-decision-rationale"
-  ephemeral_research: "gpt-5.6-luna/Low|gpt-5.6-terra/Low|gpt-5.6-sol/exceptional-rationale"
+routing_policy: project-owned-v2
+routing_policy_path: .pleiad/model-routing.json
+routing_policy_defaults: embedded-in-scripts/coordination_protocol.py
 lifecycle_policy: delivery-cell-v1
 lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"
 lifecycle_transport_overlay: per-recipient DELIVERY_UNKNOWN
