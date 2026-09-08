@@ -1,6 +1,6 @@
 schema_version: 2
 project_name: "Pleiad"
-applied_plugin_version: 1.0.0
+applied_plugin_version: 0.1.0
 release_channel: stable
 session_title_format: "#{issue_number} {role_code} - {issue_title}"
 session_title_max_characters: 36
