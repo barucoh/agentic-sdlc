@@ -1363,16 +1363,17 @@ class RepositoryStateTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, temporary, ignore_errors=True)
         target = temporary / "released-v1"
         target.mkdir()
-        base = "0af3388389848e88506aa302dac32b476ea7e2ef"
         files: dict[str, str] = {}
         for relative in manage_repository.PRE_ROUTING_MANAGED_PATHS:
-            historical = subprocess.run(["git", "show", f"{base}:{relative.as_posix()}"], cwd=ROOT, text=True, capture_output=True, check=False)
-            text = historical.stdout if historical.returncode == 0 else manage_repository.template_text(relative, "Pleiad")
+            # This is the released v1.0.0 schema-2 path set before this issue
+            # added configure_routing.py.  Template content is intentionally
+            # local so CI does not depend on checkout depth or network history.
+            text = manage_repository.template_text(relative, "Pleiad")
             path = target / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
             files[relative.as_posix()] = manage_repository.digest_bytes(text.encode("utf-8"))
-        agents = subprocess.check_output(["git", "show", f"{base}:AGENTS.md"], cwd=ROOT, text=True)
+        agents = manage_repository.desired_agents_text()
         (target / "AGENTS.md").write_text(agents, encoding="utf-8")
         override = json.dumps(default_routing_policy(), indent=2, sort_keys=True) + "\n"
         override_path = target / ".pleiad/model-routing.json"
