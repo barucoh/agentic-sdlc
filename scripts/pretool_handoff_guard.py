@@ -42,9 +42,9 @@ def is_pleiad_project(root: Path) -> bool:
 
 def canonical_validator(root: Path):
     sys.path.insert(0, str(root / "scripts"))
-    from coordination_protocol import validate_handoff  # noqa: PLC0415
+    from coordination_protocol import resolve_routing_defaults, validate_handoff, validate_host_availability  # noqa: PLC0415
 
-    return validate_handoff
+    return resolve_routing_defaults, validate_handoff, validate_host_availability
 
 
 def _json_object(text: str) -> dict[str, Any] | None:
@@ -115,7 +115,16 @@ def evaluate(event: dict[str, Any], root: Path | None = None) -> dict[str, Any] 
     envelope = extract_envelope(event.get("tool_input"))
     if envelope is None:
         return denial(["missing versioned Pleiad envelope in tool_input prompt or metadata"])
-    errors = canonical_validator(resolved_root)(envelope)
+    resolve_defaults, validate, validate_availability = canonical_validator(resolved_root)
+    resolved_envelope, errors = resolve_defaults(envelope)
+    if not errors and resolved_envelope is not None:
+        errors = validate(resolved_envelope)
+    tool_input = event.get("tool_input")
+    availability = tool_input.get("available_routes") if isinstance(tool_input, dict) else None
+    if availability is None and isinstance(tool_input, dict) and isinstance(tool_input.get("metadata"), dict):
+        availability = tool_input["metadata"].get("available_routes")
+    if not errors and resolved_envelope is not None:
+        errors = validate_availability(resolved_envelope, availability)
     return denial(errors) if errors else None
 
 

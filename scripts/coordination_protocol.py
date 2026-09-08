@@ -63,15 +63,18 @@ ROLE_CODES = {
     "reviewer": "RV",
     "knowledge_steward": "KS",
 }
-TARGET_MODELS = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+TARGET_MODELS = ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
 EFFORT_LEVELS = ("Low", "Medium", "High")
-ROUTING_MATRIX = {
+ROUTING_POLICY_PATH = SCHEMA_PATH.parents[1] / ".pleiad" / "model-routing.json"
+ROUTING_POLICY_SCHEMA_VERSION = 1
+DEFAULT_ROUTING_MATRIX = {
     "coordinator": {"gpt-5.6-sol": {"Medium"}},
     "product": {"gpt-5.6-sol": {"Medium"}},
     "architecture": {"gpt-5.6-sol": {"Medium"}},
     "implementation": {
         "gpt-5.6-luna": {"Low"},
         "gpt-5.6-terra": {"Low", "Medium", "High"},
+        "gpt-5.6-sol": {"Medium", "High"},
     },
     "qa": {"gpt-5.6-sol": {"Medium", "High"}},
     "reviewer": {"gpt-5.6-sol": {"Medium", "High"}},
@@ -81,18 +84,21 @@ ROUTING_MATRIX = {
     },
     "human_owner": {"gpt-5.6-sol": {"Medium"}},
 }
-ROUTING_POLICY_VERSION = "repository-native-v1"
+DEFAULT_ROLE_DEFAULTS = {
+    "coordinator": {"model": "gpt-5.6-sol", "effort": "Medium"},
+    "product": {"model": "gpt-5.6-sol", "effort": "Medium"},
+    "architecture": {"model": "gpt-5.6-sol", "effort": "Medium"},
+    "implementation": {"model": "gpt-5.6-luna", "effort": "Low"},
+    "qa": {"model": "gpt-5.6-sol", "effort": "Medium"},
+    "reviewer": {"model": "gpt-5.6-sol", "effort": "Medium"},
+    "knowledge_steward": {"model": "gpt-5.6-luna", "effort": "Low"},
+    "human_owner": {"model": "gpt-5.6-sol", "effort": "Medium"},
+}
+ROUTING_POLICY_VERSION = "project-owned-v2"
 ROUTING_CONFIG_LINES = (
-    "routing_policy: repository-native-v1",
-    "routing_matrix:",
-    '  coordinator: "gpt-5.6-sol/Medium"',
-    '  product: "gpt-5.6-sol/Medium"',
-    '  architecture: "gpt-5.6-sol/Medium"',
-    '  implementation: "gpt-5.6-luna/Low|gpt-5.6-terra/Low..High"',
-    '  qa: "gpt-5.6-sol/Medium|High-with-risk-rationale"',
-    '  reviewer: "gpt-5.6-sol/Medium|High-with-risk-rationale"',
-    '  knowledge_steward: "gpt-5.6-luna/Low|gpt-5.6-sol/Medium-with-decision-rationale"',
-    '  ephemeral_research: "gpt-5.6-luna/Low|gpt-5.6-terra/Low|gpt-5.6-sol/exceptional-rationale"',
+    "routing_policy: project-owned-v2",
+    "routing_policy_path: .pleiad/model-routing.json",
+    "routing_policy_defaults: embedded-in-scripts/coordination_protocol.py",
 )
 LIFECYCLE_CONFIG_LINES = (
     "lifecycle_policy: delivery-cell-v1",
@@ -165,8 +171,160 @@ def validate_session_title_config(config_text: str) -> list[str]:
     return errors
 
 
-def validate_routing(value: dict[str, Any]) -> list[str]:
-    """Enforce the repository-native model/effort policy and explicit activation."""
+def default_routing_policy() -> dict[str, Any]:
+    """Return a detached copy of the safe built-in policy."""
+
+    return {
+        "schema_version": ROUTING_POLICY_SCHEMA_VERSION,
+        "astra_enabled": True,
+        "role_defaults": {role: dict(route) for role, route in DEFAULT_ROLE_DEFAULTS.items()},
+        "allowed_routes": {
+            role: [
+                *[
+                    {"model": model, "efforts": sorted(efforts, key=EFFORT_LEVELS.index)}
+                    for model, efforts in routes.items()
+                ],
+                {"model": "gpt-6-astra", "efforts": ["High"]},
+            ]
+            for role, routes in DEFAULT_ROUTING_MATRIX.items()
+        },
+    }
+
+
+def _policy_error(path: str, message: str) -> str:
+    return f"routing policy {path} {message}"
+
+
+def validate_routing_policy(policy: Any) -> list[str]:
+    """Validate the project-owned JSON override without relaxing delivery safety."""
+
+    if not isinstance(policy, dict):
+        return ["routing policy must be a JSON object"]
+    allowed_fields = {"schema_version", "astra_enabled", "role_defaults", "allowed_routes"}
+    errors = [_policy_error(key, "is not supported") for key in sorted(set(policy) - allowed_fields)]
+    if policy.get("schema_version") != ROUTING_POLICY_SCHEMA_VERSION:
+        errors.append(_policy_error("schema_version", f"must equal {ROUTING_POLICY_SCHEMA_VERSION}"))
+    if not isinstance(policy.get("astra_enabled"), bool):
+        errors.append(_policy_error("astra_enabled", "must be true or false"))
+    defaults = policy.get("role_defaults")
+    routes = policy.get("allowed_routes")
+    if not isinstance(defaults, dict):
+        errors.append(_policy_error("role_defaults", "must be an object"))
+        defaults = {}
+    if not isinstance(routes, dict):
+        errors.append(_policy_error("allowed_routes", "must be an object"))
+        routes = {}
+    supported_roles = set(DEFAULT_ROUTING_MATRIX)
+    for role in sorted(supported_roles - set(defaults)):
+        errors.append(_policy_error("role_defaults", f"is missing required role {role!r}"))
+    for role in sorted(supported_roles - set(routes)):
+        errors.append(_policy_error("allowed_routes", f"is missing required role {role!r}"))
+    for group_name, group in (("role_defaults", defaults), ("allowed_routes", routes)):
+        for role in sorted(set(group) - supported_roles):
+            errors.append(_policy_error(f"{group_name}.{role}", "names an unsupported role"))
+    parsed_routes: dict[str, set[tuple[str, str]]] = {}
+    for role, configured in routes.items():
+        if role not in supported_roles:
+            continue
+        if not isinstance(configured, list) or not configured:
+            errors.append(_policy_error(f"allowed_routes.{role}", "must be a non-empty list"))
+            continue
+        pairs: set[tuple[str, str]] = set()
+        for index, item in enumerate(configured):
+            path = f"allowed_routes.{role}[{index}]"
+            if not isinstance(item, dict) or set(item) != {"model", "efforts"}:
+                errors.append(_policy_error(path, "must contain only model and efforts"))
+                continue
+            model, efforts = item.get("model"), item.get("efforts")
+            if model not in TARGET_MODELS:
+                errors.append(_policy_error(f"{path}.model", f"is unsupported: {model!r}"))
+                continue
+            if not isinstance(efforts, list) or not efforts:
+                errors.append(_policy_error(f"{path}.efforts", "must be a non-empty list"))
+                continue
+            for effort in efforts:
+                if effort not in EFFORT_LEVELS:
+                    errors.append(_policy_error(f"{path}.efforts", f"contains unsupported effort {effort!r}"))
+                elif (model, effort) in pairs:
+                    errors.append(_policy_error(path, "contains a duplicate model/effort route"))
+                else:
+                    pairs.add((model, effort))
+        parsed_routes[role] = pairs
+    for role, configured in defaults.items():
+        if role not in supported_roles:
+            continue
+        path = f"role_defaults.{role}"
+        if not isinstance(configured, dict) or set(configured) != {"model", "effort"}:
+            errors.append(_policy_error(path, "must contain only model and effort"))
+            continue
+        model, effort = configured.get("model"), configured.get("effort")
+        if model == "gpt-6-astra":
+            errors.append(_policy_error(path, "cannot use Astra as a routine default"))
+        if (model, effort) not in parsed_routes.get(role, set()):
+            errors.append(_policy_error(path, "must be one of that role's allowed routes"))
+    return errors
+
+
+def load_routing_policy(path: Path | None = None) -> tuple[dict[str, Any], list[str]]:
+    """Load defaults or the complete project-owned replacement policy."""
+
+    path = path or ROUTING_POLICY_PATH
+    if not path.exists():
+        return default_routing_policy(), []
+    try:
+        policy = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {}, [f"routing policy {path} is not valid JSON: {exc}"]
+    errors = validate_routing_policy(policy)
+    return (policy if not errors else {}), errors
+
+
+def policy_route_matrix(policy: dict[str, Any]) -> dict[str, dict[str, set[str]]]:
+    matrix: dict[str, dict[str, set[str]]] = {}
+    for role, routes in policy["allowed_routes"].items():
+        matrix[role] = {}
+        for route in routes:
+            matrix[role].setdefault(route["model"], set()).update(route["efforts"])
+    return matrix
+
+
+def resolve_routing_defaults(value: Any, policy_path: Path | None = None) -> tuple[dict[str, Any] | None, list[str]]:
+    """Materialize a role's configured default route before any dispatch."""
+
+    if not isinstance(value, dict):
+        return None, ["handoff must be an object before routing defaults can be resolved"]
+    policy, errors = load_routing_policy(policy_path)
+    if errors:
+        return None, errors
+    resolved = dict(value)
+    model_present = "target_model" in resolved
+    effort_present = "effort" in resolved
+    if model_present != effort_present:
+        return None, ["target_model and effort must be supplied together or both resolved from the role default"]
+    if not model_present:
+        role = resolved.get("to_role")
+        default = policy.get("role_defaults", {}).get(role)
+        if not isinstance(default, dict):
+            return None, [f"routing policy has no default route for role {role!r}"]
+        resolved["target_model"] = default["model"]
+        resolved["effort"] = default["effort"]
+    return resolved, []
+
+
+def validate_host_availability(value: dict[str, Any], available_routes: dict[str, Any] | None) -> list[str]:
+    """Reject a policy-valid route that the actual destination host cannot run."""
+
+    if not isinstance(available_routes, dict):
+        return ["host model availability is required before transport"]
+    model, effort = value.get("target_model"), value.get("effort")
+    available_efforts = available_routes.get(model)
+    if not isinstance(available_efforts, (list, tuple, set)) or effort not in available_efforts:
+        return [f"requested route {model}/{effort} is unavailable on the destination host; do not substitute a model"]
+    return []
+
+
+def validate_routing(value: dict[str, Any], policy_path: Path | None = None) -> list[str]:
+    """Enforce the project-owned routing policy and explicit activation."""
 
     errors: list[str] = []
     target_role = value.get("to_role")
@@ -175,6 +333,10 @@ def validate_routing(value: dict[str, Any]) -> list[str]:
     mode = value.get("execution_mode")
     sandbox = value.get("sandbox_mode")
     rationale = value.get("rationale", "")
+    policy, policy_errors = load_routing_policy(policy_path)
+    if policy_errors:
+        return policy_errors
+    matrix = policy_route_matrix(policy)
     if mode == "ephemeral_research":
         if model not in TARGET_MODELS:
             errors.append(f"ephemeral_research cannot route to target model {model!r}")
@@ -184,12 +346,14 @@ def validate_routing(value: dict[str, Any]) -> list[str]:
             errors.append("ephemeral Terra routing is limited to Low effort")
         elif model == "gpt-5.6-sol" and "exceptional" not in rationale.lower():
             errors.append("ephemeral Sol routing requires an explicit exceptional rationale")
+        elif model == "gpt-6-astra":
+            errors.append("ephemeral research cannot use Astra")
         if sandbox != "read-only":
             errors.append("ephemeral_research handoffs must be read-only")
     elif mode == "durable":
-        if target_role not in ROUTING_MATRIX:
+        if target_role not in matrix:
             return [f"handoff.to_role has no routing policy: {target_role!r}"]
-        allowed_models = ROUTING_MATRIX[target_role]
+        allowed_models = matrix[target_role]
         if model not in TARGET_MODELS or model not in allowed_models:
             errors.append(f"{target_role} cannot route to target model {model!r}")
         elif effort not in allowed_models[model]:
@@ -203,25 +367,22 @@ def validate_routing(value: dict[str, Any]) -> list[str]:
     else:
         errors.append(f"unknown execution mode: {mode!r}")
 
-    if mode == "durable" and model == "gpt-5.6-terra" and effort in {"Medium", "High"}:
-        lowered = rationale.lower()
-        if "risk" not in lowered and "complex" not in lowered:
-            errors.append("Terra effort above Low requires an explicit risk/complexity rationale")
-    if mode == "durable" and target_role in {"qa", "reviewer"} and effort == "High":
-        if "risk" not in rationale.lower():
-            errors.append(f"{target_role} High effort requires an explicit high-risk rationale")
-    if mode == "durable" and target_role == "knowledge_steward" and model == "gpt-5.6-sol" and "decision" not in rationale.lower():
-        errors.append("Knowledge Steward Sol routing requires a decision-heavy rationale")
+    if mode == "durable" and model == "gpt-6-astra":
+        escalation = value.get("exceptional_escalation")
+        if not policy.get("astra_enabled"):
+            errors.append("Astra is disabled by the project routing policy")
+        if not isinstance(escalation, dict) or set(escalation) != {"difficulty", "sol_insufficiency"}:
+            errors.append("Astra routing requires exceptional_escalation with difficulty and sol_insufficiency")
+        elif escalation.get("difficulty") != "exceptional" or not isinstance(escalation.get("sol_insufficiency"), str) or len(escalation["sol_insufficiency"].strip()) < 20:
+            errors.append("Astra escalation must declare exceptional difficulty and concretely explain why Sol is insufficient")
+    elif value.get("exceptional_escalation") is not None:
+        errors.append("exceptional_escalation is only valid for Astra routing")
 
     if value.get("is_correction"):
         if target_role != "implementation":
             errors.append("corrections must return to the implementation role")
-        if model not in {"gpt-5.6-luna", "gpt-5.6-terra"}:
-            errors.append("corrections must use an allowed implementation model")
         if mode != "durable":
             errors.append("corrections require durable delivery")
-    if mode == "durable" and target_role == "reviewer" and model != "gpt-5.6-sol":
-        errors.append("Reviewer activation must use gpt-5.6-sol")
     return errors
 
 
@@ -323,8 +484,6 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
     if state == LifecycleState.REVIEW_ACTIVE.value:
         if value.get("to_role") != "reviewer":
             errors.append("REVIEW_ACTIVE handoffs must explicitly activate Reviewer")
-        if value.get("target_model") != "gpt-5.6-sol" or value.get("effort") != "Medium":
-            errors.append("REVIEW_ACTIVE must activate Reviewer with Sol/Medium")
     if state == LifecycleState.CORRECTION_ACTIVE.value:
         if value.get("to_role") != "implementation" or not value.get("is_correction"):
             errors.append("CORRECTION_ACTIVE must return to the same Implementation task")
@@ -1166,13 +1325,13 @@ def _validate_schema(
     return errors
 
 
-def validate_handoff(value: Any, schema: dict[str, Any] | None = None) -> list[str]:
+def validate_handoff(value: Any, schema: dict[str, Any] | None = None, policy_path: Path | None = None) -> list[str]:
     authoritative_schema = schema or json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     compatibility_errors = _schema_support_errors(authoritative_schema)
     schema_errors = _validate_schema(value, authoritative_schema, authoritative_schema, "handoff")
     if compatibility_errors or schema_errors or not isinstance(value, dict):
         return compatibility_errors or schema_errors
-    return validate_routing(value) + validate_lifecycle_handoff(value)
+    return validate_routing(value, policy_path) + validate_lifecycle_handoff(value)
 
 
 def pre_dispatch_handoff(
@@ -1180,6 +1339,8 @@ def pre_dispatch_handoff(
     dispatch: Callable[[dict[str, Any]], Any],
     *,
     action: str,
+    available_routes: dict[str, Any] | None = None,
+    policy_path: Path | None = None,
 ) -> Any:
     """Validate the complete envelope before an issue-backed side effect.
 
@@ -1188,22 +1349,25 @@ def pre_dispatch_handoff(
     transport adapters from becoming a second handoff authority.
     """
 
-    errors = validate_handoff(value)
+    resolved, resolution_errors = resolve_routing_defaults(value, policy_path)
+    errors = resolution_errors or validate_handoff(resolved, policy_path=policy_path)
+    if not errors and resolved is not None:
+        errors = validate_host_availability(resolved, available_routes)
     if errors:
         detail = "; ".join(errors[:4])
         if len(errors) > 4:
             detail += f"; and {len(errors) - 4} more"
         raise LifecycleTransitionError(f"{action} blocked by invalid handoff: {detail}")
-    return dispatch(value)
+    return dispatch(resolved)
 
 
-def dispatch_issue_task(value: Any, create_task: Callable[[dict[str, Any]], Any]) -> Any:
+def dispatch_issue_task(value: Any, create_task: Callable[[dict[str, Any]], Any], *, available_routes: dict[str, Any] | None = None, policy_path: Path | None = None) -> Any:
     """Canonical pre-dispatch path for creating a durable role task."""
 
-    return pre_dispatch_handoff(value, create_task, action="issue-backed task creation")
+    return pre_dispatch_handoff(value, create_task, action="issue-backed task creation", available_routes=available_routes, policy_path=policy_path)
 
 
-def send_cross_task_handoff(value: Any, send: Callable[[dict[str, Any]], Any]) -> Any:
+def send_cross_task_handoff(value: Any, send: Callable[[dict[str, Any]], Any], *, available_routes: dict[str, Any] | None = None, policy_path: Path | None = None) -> Any:
     """Canonical pre-dispatch path for a required peer handoff/wake-up."""
 
-    return pre_dispatch_handoff(value, send, action="cross-task send")
+    return pre_dispatch_handoff(value, send, action="cross-task send", available_routes=available_routes, policy_path=policy_path)

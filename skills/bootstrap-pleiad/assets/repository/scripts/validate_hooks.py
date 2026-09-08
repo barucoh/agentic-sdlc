@@ -50,8 +50,9 @@ def main() -> int:
         print("repository hook command must be cross-platform and resolve from the Git root", file=sys.stderr)
         return 2
     template = json.loads((ROOT / ".pleiad" / "handoff-template.json").read_text(encoding="utf-8"))
-    valid = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(template)}})
-    legacy = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(template)}})
+    availability = {"gpt-5.6-sol": ["Medium"], "gpt-5.6-terra": ["Low", "Medium", "High"], "gpt-5.6-luna": ["Low"], "gpt-6-astra": ["High"]}
+    valid = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(template), "available_routes": availability}})
+    legacy = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(template), "available_routes": availability}})
     invalid = run_guard({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: {\"schema_version\": \"1.0.0\"}"}})
     if valid.returncode != 0 or valid.stdout.strip():
         print("valid native-task hook probe was not allowed", file=sys.stderr)

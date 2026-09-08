@@ -63,7 +63,7 @@
     "objective": { "type": "string", "minLength": 1 },
     "target_model": {
       "type": "string",
-      "enum": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
+      "enum": ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
     },
     "effort": {
       "type": "string",
@@ -79,6 +79,14 @@
       "enum": ["read-only", "workspace-write"]
     },
     "is_correction": { "type": "boolean" },
+    "exceptional_escalation": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "difficulty": { "type": "string", "enum": ["exceptional"] },
+        "sol_insufficiency": { "type": "string", "minLength": 20 }
+      },
+      "required": ["difficulty", "sol_insufficiency"]
+    },
     "lifecycle_state": {
       "type": "string",
       "enum": ["IMPLEMENTATION_ACTIVE", "IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVE", "CHANGES_REQUESTED", "CORRECTION_ACTIVE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED", "ESCALATED"]

@@ -32,6 +32,8 @@ from coordination_protocol import (  # noqa: E402
     session_title_for_role,
     validate_handoff,
     validate_routing,
+    default_routing_policy,
+    validate_routing_policy,
     validate_session_title_config,
     dispatch_issue_task,
     send_cross_task_handoff,
@@ -236,21 +238,49 @@ class HandoffAndCoordinationTests(unittest.TestCase):
                 self.assertEqual(validate_routing(value), [])
                 cases += 1
         self.assertEqual(cases, 7)
+        policy = default_routing_policy()
+        self.assertTrue(policy["astra_enabled"])
+        self.assertEqual(policy["role_defaults"]["qa"], {"model": "gpt-5.6-sol", "effort": "Medium"})
+        self.assertEqual(policy["role_defaults"]["reviewer"], {"model": "gpt-5.6-sol", "effort": "Medium"})
+        self.assertTrue(all({"model": "gpt-6-astra", "efforts": ["High"]} in routes for routes in policy["allowed_routes"].values()))
 
     def test_pre_dispatch_validation_blocks_task_creation_and_send_before_side_effects(self) -> None:
+        available = {"gpt-5.6-sol": ["Medium"], "gpt-5.6-terra": ["Low", "Medium", "High"], "gpt-5.6-luna": ["Low"], "gpt-6-astra": ["High"]}
         invalid = self.handoff()
         invalid["objective"] = ""
         calls: list[str] = []
         with self.assertRaisesRegex(LifecycleTransitionError, "issue-backed task creation blocked"):
-            dispatch_issue_task(invalid, lambda _: calls.append("create"))
+            dispatch_issue_task(invalid, lambda _: calls.append("create"), available_routes=available)
         with self.assertRaisesRegex(LifecycleTransitionError, "cross-task send blocked"):
-            send_cross_task_handoff(invalid, lambda _: calls.append("send"))
+            send_cross_task_handoff(invalid, lambda _: calls.append("send"), available_routes=available)
         self.assertEqual(calls, [])
 
         valid = self.handoff()
-        self.assertEqual(dispatch_issue_task(valid, lambda envelope: (calls.append("create"), envelope)[1]), valid)
-        self.assertEqual(send_cross_task_handoff(valid, lambda envelope: (calls.append("send"), envelope)[1]), valid)
+        self.assertEqual(dispatch_issue_task(valid, lambda envelope: (calls.append("create"), envelope)[1], available_routes=available), valid)
+        self.assertEqual(send_cross_task_handoff(valid, lambda envelope: (calls.append("send"), envelope)[1], available_routes=available), valid)
         self.assertEqual(calls, ["create", "send"])
+
+    def test_dispatch_resolves_project_defaults_and_checks_host_availability(self) -> None:
+        temporary = ROOT / "tests" / ".tmp" / str(uuid4())
+        temporary.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, temporary, ignore_errors=True)
+        policy = default_routing_policy()
+        policy["allowed_routes"]["qa"] = [{"model": "gpt-5.6-terra", "efforts": ["Low"]}]
+        policy["role_defaults"]["qa"] = {"model": "gpt-5.6-terra", "effort": "Low"}
+        policy_path = temporary / "model-routing.json"
+        policy_path.write_text(json.dumps(policy), encoding="utf-8")
+        handoff = self.handoff()
+        handoff.pop("target_model")
+        handoff.pop("effort")
+        delivered: list[dict] = []
+        dispatch_issue_task(handoff, delivered.append, policy_path=policy_path, available_routes={"gpt-5.6-terra": ["Low"]})
+        resolved = delivered[0]
+        self.assertEqual(resolved["target_model"], "gpt-5.6-terra")
+        self.assertEqual(resolved["effort"], "Low")
+        self.assertEqual(delivered, [resolved])
+        with self.assertRaisesRegex(LifecycleTransitionError, "unavailable"):
+            dispatch_issue_task(handoff, delivered.append, policy_path=policy_path, available_routes={"gpt-5.6-sol": ["Medium"]})
+        self.assertEqual(len(delivered), 1)
 
     def test_handoff_validator_cli_uses_the_same_authority(self) -> None:
         valid = self.handoff()
@@ -277,11 +307,12 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertNotIn("hooks", json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8")))
         self.assertFalse(any((ROOT / "hooks").iterdir()) if (ROOT / "hooks").is_dir() else False, "the plugin must not register hooks outside an adopted repository")
         guard = ROOT / "scripts/pretool_handoff_guard.py"
-        valid_event = {"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(self.handoff())}}
+        availability = {"gpt-5.6-sol": ["Medium"], "gpt-5.6-terra": ["Low", "Medium", "High"], "gpt-5.6-luna": ["Low"], "gpt-6-astra": ["High"]}
+        valid_event = {"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(self.handoff()), "available_routes": availability}}
         allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(valid_event), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(allowed.returncode, 0)
         self.assertEqual(allowed.stdout.strip(), "")
-        legacy_event = {"tool_name": "codex_app__create_thread", "tool_input": {"metadata": {"agentic_sdlc_handoff": self.handoff()}}}
+        legacy_event = {"tool_name": "codex_app__create_thread", "tool_input": {"metadata": {"agentic_sdlc_handoff": self.handoff(), "available_routes": availability}}}
         legacy_allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(legacy_event), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(legacy_allowed.returncode, 0)
         self.assertEqual(legacy_allowed.stdout.strip(), "")
@@ -408,10 +439,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
     def test_invalid_model_effort_and_role_pairings_fail(self) -> None:
         mutations = {
             "unknown model": {"target_model": "gpt-9.0", "effort": "Low"},
-            "Sol implementation": {"to_role": "implementation", "target_model": "gpt-5.6-sol", "effort": "Medium", "sandbox_mode": "workspace-write"},
             "Luna reviewer": {"to_role": "reviewer", "target_model": "gpt-5.6-luna", "effort": "Low", "sandbox_mode": "read-only"},
-            "Terra high without rationale": {"to_role": "implementation", "target_model": "gpt-5.6-terra", "effort": "High", "sandbox_mode": "workspace-write", "rationale": "A normal implementation task."},
-            "Reviewer high without risk": {"to_role": "reviewer", "target_model": "gpt-5.6-sol", "effort": "High", "sandbox_mode": "read-only", "rationale": "A normal review task."},
+            "Astra without escalation": {"to_role": "implementation", "target_model": "gpt-6-astra", "effort": "High", "sandbox_mode": "workspace-write"},
         }
         for name, changes in mutations.items():
             with self.subTest(name=name):
@@ -423,13 +452,34 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         correction = self.handoff()
         correction.update({"is_correction": True, "to_role": "implementation", "target_model": "gpt-5.6-luna", "effort": "Low", "sandbox_mode": "workspace-write"})
         self.assertEqual(validate_routing(correction), [])
-        invalid = copy.deepcopy(correction)
-        invalid["target_model"] = "gpt-5.6-sol"
-        invalid["effort"] = "Medium"
-        self.assertTrue(validate_handoff(invalid))
+        difficult = copy.deepcopy(correction)
+        difficult["target_model"] = "gpt-5.6-sol"
+        difficult["effort"] = "Medium"
+        self.assertEqual(validate_routing(difficult), [])
         reviewer = self.handoff()
         reviewer.update({"to_role": "reviewer", "target_model": "gpt-5.6-sol", "effort": "Medium", "sandbox_mode": "read-only"})
         self.assertEqual(validate_routing(reviewer), [])
+
+    def test_project_policy_controls_canonical_validation_and_astra_escalation(self) -> None:
+        temporary = ROOT / "tests" / ".tmp" / str(uuid4())
+        temporary.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, temporary, ignore_errors=True)
+        policy = default_routing_policy()
+        self.assertEqual(validate_routing_policy(policy), [])
+        policy_path = temporary / "model-routing.json"
+        policy_path.write_text(json.dumps(policy), encoding="utf-8")
+        astra = self.handoff()
+        astra.update({"to_role": "implementation", "target_model": "gpt-6-astra", "effort": "High", "sandbox_mode": "workspace-write", "exceptional_escalation": {"difficulty": "exceptional", "sol_insufficiency": "The task needs cross-domain reasoning beyond Sol's supported review depth."}})
+        self.assertEqual(validate_routing(astra, policy_path), [])
+        missing = copy.deepcopy(astra)
+        missing.pop("exceptional_escalation")
+        self.assertTrue(validate_routing(missing, policy_path))
+        policy["astra_enabled"] = False
+        policy_path.write_text(json.dumps(policy), encoding="utf-8")
+        self.assertTrue(validate_routing(astra, policy_path))
+        policy["astra_enabled"] = True
+        policy["role_defaults"]["implementation"] = {"model": "gpt-6-astra", "effort": "High"}
+        self.assertTrue(validate_routing_policy(policy))
 
     def test_ephemeral_research_is_read_only_and_model_bounded(self) -> None:
         valid = self.handoff()
@@ -923,8 +973,8 @@ class HandoffAndCoordinationTests(unittest.TestCase):
             self.assertIn(risk_class, coordination)
         self.assertIn("bounded read-only", coordination)
         self.assertIn("cross_task_watchdog_seconds: 25", config)
-        self.assertIn("routing_policy: repository-native-v1", config)
-        self.assertIn("gpt-5.6-luna/Low|gpt-5.6-terra/Low..High", config)
+        self.assertIn("routing_policy: project-owned-v2", config)
+        self.assertIn("routing_policy_path: .pleiad/model-routing.json", config)
 
 
 class RepositoryStateTests(unittest.TestCase):
@@ -1167,6 +1217,7 @@ class RepositoryStateTests(unittest.TestCase):
         for relative in (
             ".codex/hooks.json",
             "scripts/coordination_protocol.py",
+            "scripts/configure_routing.py",
             "scripts/pretool_handoff_guard.py",
             "scripts/validate_handoff.py",
             "scripts/validate_hooks.py",
@@ -1176,7 +1227,7 @@ class RepositoryStateTests(unittest.TestCase):
         config = (target / ".pleiad/config.yaml").read_text(encoding="utf-8")
         self.assertIn('project_name: "Legacy Fixture"', config)
         self.assertIn('session_title_format: "#{issue_number} {role_code} - {issue_title}"', config)
-        self.assertIn("routing_policy: repository-native-v1", config)
+        self.assertIn("routing_policy: project-owned-v2", config)
         self.assertNotIn("{project_name} #{issue_number}", config)
         again, _, _ = manage_repository.plan(target, "Legacy Fixture")
         self.assertFalse([a for a in again if a.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
@@ -1292,7 +1343,7 @@ class RepositoryStateTests(unittest.TestCase):
         target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
         manifest_path = target / ".pleiad/managed.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        hook_assets = {".codex/hooks.json", "scripts/pretool_handoff_guard.py", "scripts/validate_hooks.py"}
+        hook_assets = {".codex/hooks.json", "scripts/configure_routing.py", "scripts/pretool_handoff_guard.py", "scripts/validate_hooks.py"}
         manifest["schema_version"] = 1
         for relative in hook_assets:
             manifest["files"].pop(relative)
@@ -1305,6 +1356,69 @@ class RepositoryStateTests(unittest.TestCase):
         migrated = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(migrated["schema_version"], manage_repository.MANIFEST_SCHEMA_VERSION)
         self.assertTrue(hook_assets <= set(migrated["files"]))
+
+    def test_released_v1_0_schema2_upgrade_preserves_project_routing_override(self) -> None:
+        temporary = ROOT / "tests" / ".tmp" / str(uuid4())
+        temporary.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, temporary, ignore_errors=True)
+        target = temporary / "released-v1"
+        target.mkdir()
+        base = "0af3388389848e88506aa302dac32b476ea7e2ef"
+        files: dict[str, str] = {}
+        for relative in manage_repository.PRE_ROUTING_MANAGED_PATHS:
+            text = subprocess.check_output(["git", "show", f"{base}:{relative.as_posix()}"], cwd=ROOT, text=True)
+            path = target / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            files[relative.as_posix()] = manage_repository.digest_bytes(text.encode("utf-8"))
+        agents = subprocess.check_output(["git", "show", f"{base}:AGENTS.md"], cwd=ROOT, text=True)
+        (target / "AGENTS.md").write_text(agents, encoding="utf-8")
+        override = json.dumps(default_routing_policy(), indent=2, sort_keys=True) + "\n"
+        override_path = target / ".pleiad/model-routing.json"
+        override_path.write_text(override, encoding="utf-8")
+        manifest = {"schema_version": 2, "plugin_version": "1.0.0", "project_name": "Pleiad", "files": files, "managed_blocks": {"AGENTS.md": manage_repository.digest_bytes(manage_repository.extract_agents_block(agents).encode("utf-8"))}}
+        manifest_path = target / ".pleiad/managed.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        actions, writes, obsolete = manage_repository.plan(target, "Pleiad")
+        self.assertFalse([action for action in actions if action.classification == "conflict"])
+        self.assertIn(("create", "scripts/configure_routing.py"), {(action.classification, action.path.as_posix()) for action in actions})
+        manage_repository.apply(target, writes, obsolete, "Pleiad")
+        self.assertEqual(override_path.read_text(encoding="utf-8"), override)
+        repeat, _, _ = manage_repository.plan(target, "Pleiad")
+        self.assertFalse([action for action in repeat if action.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
+
+    def test_configure_routing_validates_applies_and_preserves_project_override(self) -> None:
+        temporary = ROOT / "tests" / ".tmp" / str(uuid4())
+        temporary.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, temporary, ignore_errors=True)
+        target = temporary / "configured"
+        target.mkdir()
+        actions, writes, obsolete = manage_repository.plan(target, "Configured Fixture")
+        self.assertFalse([action for action in actions if action.classification == "conflict"])
+        manage_repository.apply(target, writes, obsolete, "Configured Fixture")
+        policy = default_routing_policy()
+        candidate = temporary / "requested-policy.json"
+        candidate.write_text(json.dumps(policy), encoding="utf-8")
+        cli = target / "scripts/configure_routing.py"
+        dry = subprocess.run([sys.executable, str(cli), "dry-run", "--target", str(target), "--policy", str(candidate)], text=True, capture_output=True, check=False)
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertIn("create: .pleiad/model-routing.json", dry.stdout)
+        applied = subprocess.run([sys.executable, str(cli), "apply", "--target", str(target), "--policy", str(candidate)], text=True, capture_output=True, check=False)
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        saved = target / ".pleiad/model-routing.json"
+        before_upgrade = saved.read_text(encoding="utf-8")
+        handoff = json.loads((target / ".pleiad/handoff-template.json").read_text(encoding="utf-8"))
+        handoff.update({"to_role": "implementation", "target_model": "gpt-6-astra", "effort": "High", "sandbox_mode": "workspace-write", "exceptional_escalation": {"difficulty": "exceptional", "sol_insufficiency": "The issue needs a cross-domain resolution beyond Sol's supported depth."}})
+        probe = "import json,sys; sys.path.insert(0, 'scripts'); from coordination_protocol import validate_routing; raise SystemExit(0 if not validate_routing(json.loads(sys.stdin.read())) else 2)"
+        self.assertEqual(subprocess.run([sys.executable, "-c", probe], input=json.dumps(handoff), text=True, cwd=target, capture_output=True, check=False).returncode, 0)
+        actions, _, _ = manage_repository.plan(target, "Configured Fixture")
+        self.assertFalse([action for action in actions if action.classification in {"create", "update", "delete", "managed-block-update", "conflict"}])
+        self.assertEqual(saved.read_text(encoding="utf-8"), before_upgrade)
+        policy["unknown"] = True
+        candidate.write_text(json.dumps(policy), encoding="utf-8")
+        invalid = subprocess.run([sys.executable, str(cli), "apply", "--target", str(target), "--policy", str(candidate)], text=True, capture_output=True, check=False)
+        self.assertEqual(invalid.returncode, 2)
+        self.assertEqual(saved.read_text(encoding="utf-8"), before_upgrade)
 
     def test_windows_crlf_noop_apply_preserves_managed_manifest_bytes(self) -> None:
         target, _ = self.apply_fixture("customized_repository", "Customized Fixture")
