@@ -115,14 +115,16 @@ def evaluate(event: dict[str, Any], root: Path | None = None) -> dict[str, Any] 
     envelope = extract_envelope(event.get("tool_input"))
     if envelope is None:
         return denial(["missing versioned Pleiad envelope in tool_input prompt or metadata"])
-    resolve_defaults, validate, _ = canonical_validator(resolved_root)
-    resolved_envelope, errors = resolve_defaults(envelope)
-    if not errors and resolved_envelope is not None:
-        errors = validate(resolved_envelope)
+    _, validate, _ = canonical_validator(resolved_root)
+    # The hook observes the envelope already placed in the native prompt or
+    # metadata; it cannot rewrite that transport payload.  Defaults are
+    # materialized by the pre-dispatch helper before its callback, while this
+    # boundary must insist that the on-wire envelope is already schema-valid.
+    errors = validate(envelope)
     tool_input = event.get("tool_input")
-    if not errors and resolved_envelope is not None:
-        expected_model = resolved_envelope["target_model"]
-        expected_effort = resolved_envelope["effort"].lower()
+    if not errors:
+        expected_model = envelope["target_model"]
+        expected_effort = envelope["effort"].lower()
         if not isinstance(tool_input, dict) or tool_input.get("model") != expected_model or tool_input.get("thinking") != expected_effort:
             errors = ["native tool model and thinking must explicitly match the resolved routing policy before dispatch"]
     return denial(errors) if errors else None

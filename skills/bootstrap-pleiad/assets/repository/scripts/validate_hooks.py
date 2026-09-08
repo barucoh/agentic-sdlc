@@ -53,6 +53,10 @@ def main() -> int:
     valid = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(template), "model": "gpt-5.6-sol", "thinking": "medium"}})
     legacy = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(template), "model": "gpt-5.6-sol", "thinking": "medium"}})
     invalid = run_guard({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: {\"schema_version\": \"1.0.0\"}"}})
+    incomplete = dict(template)
+    incomplete.pop("target_model")
+    incomplete.pop("effort")
+    incomplete_route = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(incomplete), "model": "gpt-5.6-sol", "thinking": "medium"}})
     if valid.returncode != 0 or valid.stdout.strip():
         print("valid native-task hook probe was not allowed", file=sys.stderr)
         return 2
@@ -67,6 +71,9 @@ def main() -> int:
         return 2
     if invalid.returncode != 0 or denial["hookSpecificOutput"].get("permissionDecision") != "deny" or "PLEIAD_HANDOFF_INVALID" not in reason:
         print("invalid native-task hook probe was not denied", file=sys.stderr)
+        return 2
+    if incomplete_route.returncode != 0 or '"permissionDecision": "deny"' not in incomplete_route.stdout:
+        print("incomplete on-wire routing fields were not denied", file=sys.stderr)
         return 2
     print("Validated repository-native task-boundary hook contract for codex_app__create_thread and codex_app__send_message_to_thread")
     return 0

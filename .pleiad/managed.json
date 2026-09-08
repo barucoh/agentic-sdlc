@@ -16,10 +16,10 @@
     "docs/pleiad/role-contracts.md": "d27b442fb0259ec5815365cdb6b9aaa453b13ba1aadf0353143e0efaf2ad9db4",
     "scripts/configure_routing.py": "c71ac32d69654062b06456256be5f52a14c1adfa8dd75e74731ec1e8ee73f64a",
     "scripts/coordination_protocol.py": "0e800234b02a1e96cf2c034df5f66e73f975948c6543f7baa08dfe03ef968d78",
-    "scripts/pretool_handoff_guard.py": "dab5d9b2d6ca9385ac91c6de763969db106d7d0142a7df8db810964af12ebd98",
+    "scripts/pretool_handoff_guard.py": "8b82c1108026e24f7e78f232570428fadadd356f2f11d2b0439d3468072bc105",
     "scripts/qa_workspace.py": "fd26a79bb4910192d5cc039ff363ab6b0f3ad2dc7dd8d194ab2f5ab2ac0b7417",
     "scripts/validate_handoff.py": "29121149be574cb5a741b3c7a96784b8ba92af8d221a916eeeb8359d8d022a25",
-    "scripts/validate_hooks.py": "5a4e486c2897bd5de3afa9158e319e42437512ebfe1cfffeb117585bb2cce130"
+    "scripts/validate_hooks.py": "cc0abf43a77fc1a4a3c271028ca52e5032247f5eecb466cf3904cf725cff9a0c"
   },
   "managed_blocks": {
     "AGENTS.md": "452042a1b5b8718b6294d870aa1946f7e85d47534488efac196b93af529510aa"

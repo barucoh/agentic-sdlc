@@ -1,0 +1,569 @@
+diff --git a/.codex/agents/architecture.toml b/.codex/agents/architecture.toml
+index 0ff6b79..432ff35 100644
+--- a/.codex/agents/architecture.toml
++++ b/.codex/agents/architecture.toml
+@@ -7,7 +7,7 @@ Role contract: Architecture
+ Session role code: AR.
+ 
+ Inputs: authoritative issue; accepted product requirements; repository topology; ADR context returned by adr-context; operational constraints.
+-Routing: Use the validated project model-routing policy for this role's defaults and permitted routes. Every handoff passes target model, effort, and a one-sentence rationale explicitly; Astra requires its structured exceptional escalation.
++Routing: Architecture decision work uses target_model `gpt-5.6-sol` and effort `Medium` by default; every handoff passes target model, effort, and a one-sentence rationale explicitly.
+ Outputs: system boundaries; interface and data-flow constraints; architecture acceptance conditions; ADR action recommendation; residual technical risks.
+ Terminal states: completed, changes_requested, blocked.
+ Escalation conditions: missing product decision; conflict with an active ADR; cross-project impact; irreversible or high-cost choice; need to clarify or supersede an ADR.
+diff --git a/.codex/agents/coordinator.toml b/.codex/agents/coordinator.toml
+index 5f01780..188b2c8 100644
+--- a/.codex/agents/coordinator.toml
++++ b/.codex/agents/coordinator.toml
+@@ -7,7 +7,7 @@ Role contract: Coordinator
+ Session role code: CO.
+ 
+ Inputs: authoritative issue; repository policy; dependency state; role handoffs; GitHub and check state.
+-Routing: Use the validated project model-routing policy for this role's defaults and permitted routes. Every activation passes target model, effort, and a one-sentence rationale explicitly; Astra requires its structured exceptional escalation.
++Routing: Coordinator orchestration uses target_model `gpt-5.6-sol` and effort `Medium` by default; every activation passes target model, effort, and a one-sentence rationale explicitly.
+ Lifecycle: Establish authoritative scope and bind the dedicated IM, QA, and RV delivery-cell tasks with their machine-local handles. Supervise watchdogs and reconcile GitHub, but do not relay routine IM, QA, and RV messages. Reconcile exact per-recipient child delivery UUIDs for DELIVERY_UNKNOWN without replaying their parent lifecycle event. Receive only DELIVERY_CELL_COMPLETED/HUMAN_MERGE_READY, BLOCKED, escalation, or transport uncertainty outcomes.
+ Outputs: scoped work sequence; issue-backed user-visible task assignments; operation IDs; reconciled handoffs; final readiness report.
+ Terminal states: completed, changes_requested, blocked. DELIVERY_UNKNOWN is a transport state and is never treated as task failure.
+diff --git a/.codex/agents/implementation.toml b/.codex/agents/implementation.toml
+index a9f4dd4..d7f6844 100644
+--- a/.codex/agents/implementation.toml
++++ b/.codex/agents/implementation.toml
+@@ -7,7 +7,7 @@ Role contract: Implementation
+ Session role code: IM.
+ 
+ Inputs: authoritative issue; accepted product and architecture constraints; applicable AGENTS.md; ADR context from adr-context; acceptance criteria; correction findings.
+-Routing: Use the validated project model-routing policy for this role's defaults and permitted routes. Difficult implementation may use Sol when the policy permits it; Astra requires its structured exceptional escalation and is never a routine default.
++Routing: Documentation, template, configuration, and straightforward implementation uses target_model `gpt-5.6-luna` and effort `Low` by default. Nontrivial work may use `gpt-5.6-terra` with Low by default; Medium or High requires an explicit risk/complexity rationale and Sol is not an implementation route.
+ Lifecycle: Send IMPLEMENTATION_READY directly to the bound QA and Reviewer tasks as one lifecycle event with durable GitHub evidence, exact commit SHA, PR URL, local gates, CI, and one child delivery UUID per recipient. A recipient timeout is a per-target DELIVERY_UNKNOWN overlay and must be reconciled without replaying the lifecycle event. Receive QA or Reviewer corrections directly in this same task; never approve or merge.
+ Outputs: scoped code or documentation changes; tests; commit and draft PR; exact verification evidence; finding-to-fix map for corrections; residual risk.
+ Terminal states: completed, changes_requested, blocked.
+diff --git a/.codex/agents/knowledge_steward.toml b/.codex/agents/knowledge_steward.toml
+index 677cb7c..bed98f7 100644
+--- a/.codex/agents/knowledge_steward.toml
++++ b/.codex/agents/knowledge_steward.toml
+@@ -7,7 +7,7 @@ Role contract: Knowledge Steward
+ Session role code: KS.
+ 
+ Inputs: authoritative issue; accepted decisions; implementation and verification evidence; canonical documentation; ADR context from adr-context.
+-Routing: Use the validated project model-routing policy for this role's defaults and permitted routes. Every activation passes model, effort, and rationale explicitly; Astra requires its structured exceptional escalation and is never a routine default.
++Routing: Routine Knowledge Steward documentation uses target_model `gpt-5.6-luna` and effort `Low`; decision-heavy documentation may use Sol/Medium only with a decision rationale, and every activation passes model, effort, and rationale explicitly.
+ Outputs: minimal canonical documentation updates; ADR clarification, supersession, or creation when justified; updated indexes; provenance and residual knowledge gaps.
+ Terminal states: completed, changes_requested, blocked.
+ Escalation conditions: unclear decision ownership; conflicting canonical sources; proposed ADR without accepted decision; documentation change that expands product or architecture scope.
+diff --git a/.codex/agents/product.toml b/.codex/agents/product.toml
+index ebda96b..5efa37e 100644
+--- a/.codex/agents/product.toml
++++ b/.codex/agents/product.toml
+@@ -7,7 +7,7 @@ Role contract: Product
+ Session role code: PD.
+ 
+ Inputs: authoritative issue; user and stakeholder intent; repository product documentation; relevant ADR context supplied through adr-context.
+-Routing: Use the validated project model-routing policy for this role's defaults and permitted routes. Every handoff passes target model, effort, and a one-sentence rationale explicitly; Astra requires its structured exceptional escalation.
++Routing: Product decision work uses target_model `gpt-5.6-sol` and effort `Medium` by default; every handoff passes target model, effort, and a one-sentence rationale explicitly.
+ Outputs: clarified objective; in-scope and non-goal boundaries; observable acceptance criteria; resolved requirement questions; residual product risks.
+ Terminal states: completed, changes_requested, blocked.
+ Escalation conditions: conflicting stakeholder intent; missing decision authority; untestable acceptance criteria; material scope expansion; architecture constraint requiring Architecture ownership.
+diff --git a/.codex/agents/qa.toml b/.codex/agents/qa.toml
+index 057c96b..b144de1 100644
+--- a/.codex/agents/qa.toml
++++ b/.codex/agents/qa.toml
+@@ -7,7 +7,7 @@ Role contract: QA
+ Session role code: QA.
+ 
+ Inputs: authoritative issue; acceptance criteria; implementation PR and commit; runnable instructions; relevant ADR context from adr-context.
+-Routing: Use the validated project model-routing policy for this role's defaults and permitted routes. Every activation passes model, effort, and rationale explicitly; Astra requires its structured exceptional escalation.
++Routing: Independent QA uses target_model `gpt-5.6-sol` and effort `Medium` by default; High requires an explicit high-risk rationale and every activation passes model, effort, and rationale explicitly.
+ Outputs: independent scenario evidence; pass/fail by criterion; regression results; reproducible defects; environment limitations; residual quality risk.
+ Terminal states: completed, changes_requested, blocked.
+ Escalation conditions: non-runnable build; missing test data or authority; ambiguous expected behavior; unreproducible environment failure; acceptance or ADR conflict.
+diff --git a/.codex/agents/reviewer.toml b/.codex/agents/reviewer.toml
+index a775946..4c85152 100644
+--- a/.codex/agents/reviewer.toml
++++ b/.codex/agents/reviewer.toml
+@@ -7,7 +7,7 @@ Role contract: Reviewer
+ Session role code: RV.
+ 
+ Inputs: authoritative issue; PR diff and commit; product and architecture constraints; ADR context from adr-context; QA and CI evidence.
+-Routing: Use the validated project model-routing policy for this role's defaults and permitted routes. Every activation passes model, effort, and rationale explicitly; Astra requires its structured exceptional escalation.
++Routing: Independent Reviewer activation explicitly uses target_model `gpt-5.6-sol` and effort `Medium`; High requires an explicit high-risk rationale and every activation passes model, effort, and rationale explicitly.
+ Lifecycle: Reviewer is the delivery-cell verification lead. Receive IMPLEMENTATION_READY from IM and structured QA evidence directly, send CHANGES_REQUESTED directly to the same IM, recheck the corrected exact SHA, and send DELIVERY_CELL_COMPLETED/HUMAN_MERGE_READY to CO only after matching QA_PASSED and zero actionable findings. Each peer recipient delivery has its own UUID and delivery state; DELIVERY_UNKNOWN is reconciled per target without changing lifecycle state. Return BLOCKED or escalation to CO.
+ Outputs: prioritized findings; independent verification evidence; approval recommendation or changes_requested; residual risk and human gates.
+ Terminal states: completed, changes_requested, blocked.
+diff --git a/.pleiad/config.yaml b/.pleiad/config.yaml
+index b078af4..1812a8b 100644
+--- a/.pleiad/config.yaml
++++ b/.pleiad/config.yaml
+@@ -12,9 +12,16 @@ role_codes:
+   qa: QA
+   reviewer: RV
+   knowledge_steward: KS
+-routing_policy: project-owned-v2
+-routing_policy_path: .pleiad/model-routing.json
+-routing_policy_defaults: embedded-in-scripts/coordination_protocol.py
++routing_policy: repository-native-v1
++routing_matrix:
++  coordinator: "gpt-5.6-sol/Medium"
++  product: "gpt-5.6-sol/Medium"
++  architecture: "gpt-5.6-sol/Medium"
++  implementation: "gpt-5.6-luna/Low|gpt-5.6-terra/Low..High"
++  qa: "gpt-5.6-sol/Medium|High-with-risk-rationale"
++  reviewer: "gpt-5.6-sol/Medium|High-with-risk-rationale"
++  knowledge_steward: "gpt-5.6-luna/Low|gpt-5.6-sol/Medium-with-decision-rationale"
++  ephemeral_research: "gpt-5.6-luna/Low|gpt-5.6-terra/Low|gpt-5.6-sol/exceptional-rationale"
+ lifecycle_policy: delivery-cell-v1
+ lifecycle_sequence: "IMPLEMENTATION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->CHANGES_REQUESTED->CORRECTION_ACTIVE->IMPLEMENTATION_READY->QA_PASSED->REVIEW_ACTIVE->REVIEW_ACCEPTED->HUMAN_MERGE_READY"
+ lifecycle_transport_overlay: per-recipient DELIVERY_UNKNOWN
+diff --git a/.pleiad/handoff.schema.json b/.pleiad/handoff.schema.json
+index 303aab4..af39499 100644
+--- a/.pleiad/handoff.schema.json
++++ b/.pleiad/handoff.schema.json
+@@ -63,7 +63,7 @@
+     "objective": { "type": "string", "minLength": 1 },
+     "target_model": {
+       "type": "string",
+-      "enum": ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
++      "enum": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
+     },
+     "effort": {
+       "type": "string",
+@@ -79,14 +79,6 @@
+       "enum": ["read-only", "workspace-write"]
+     },
+     "is_correction": { "type": "boolean" },
+-    "exceptional_escalation": {
+-      "type": "object", "additionalProperties": false,
+-      "properties": {
+-        "difficulty": { "type": "string", "enum": ["exceptional"] },
+-        "sol_insufficiency": { "type": "string", "minLength": 20 }
+-      },
+-      "required": ["difficulty", "sol_insufficiency"]
+-    },
+     "lifecycle_state": {
+       "type": "string",
+       "enum": ["IMPLEMENTATION_ACTIVE", "IMPLEMENTATION_READY", "QA_PASSED", "QA_CHANGES_REQUESTED", "REVIEW_ACTIVE", "CHANGES_REQUESTED", "CORRECTION_ACTIVE", "REVIEW_ACCEPTED", "HUMAN_MERGE_READY", "BLOCKED", "ESCALATED"]
+diff --git a/docs/pleiad/coordination.md b/docs/pleiad/coordination.md
+index 8004681..054150d 100644
+--- a/docs/pleiad/coordination.md
++++ b/docs/pleiad/coordination.md
+@@ -70,7 +70,7 @@ Official references: [Hooks](https://learn.chatgpt.com/docs/hooks), [Codex SDK](
+ 
+ Name every new user-visible task `#<issue number> <role code> - <issue title>` using `CO`, `PD`, `AR`, `IM`, `QA`, `RV`, or `KS`; reject unknown codes. The maximum full title is 36 Unicode characters; truncate only the issue-title segment and end it with one `…`.
+ 
+-Every durable handoff carries explicit target model, effort, and one-sentence rationale. The effective validated project policy provides defaults: Luna for straightforward implementation, Terra for nontrivial implementation, Sol for difficult implementation and coordination/design/QA/review; QA and Reviewer are Sol/Medium. A project-owned `.pleiad/model-routing.json` may customize permitted routes without changing role authority, sandbox, evidence, or lifecycle rules. The recommended Astra route is exceptional/High effort; projects may explicitly permit another supported effort, but it is never routine and needs a structured explanation of why Sol is insufficient. Projects can disable it. Handoff terminal states are `completed`, `changes_requested`, and `blocked`; transport may additionally report `DELIVERY_UNKNOWN`.
++Every durable handoff carries explicit target model, effort, and one-sentence rationale. Coordinator/Product/Architecture use Sol/Medium by default, routine Implementation and Knowledge Steward use Luna/Low, QA/Reviewer use Sol/Medium, and corrections return to the same Implementation task using Luna or Terra. Handoff terminal states are `completed`, `changes_requested`, and `blocked`; transport may additionally report `DELIVERY_UNKNOWN`.
+ 
+ Before every issue-backed task creation and every required cross-task send, the Coordinator calls the repository-native `dispatch_issue_task` or `send_cross_task_handoff` helper from `scripts/coordination_protocol.py`. Each helper validates the complete versioned envelope with `validate_handoff` and returns actionable errors without invoking the transport callback when invalid. This is the sole pre-dispatch authority; native task messaging remains transport only.
+ 
+diff --git a/docs/pleiad/role-contracts.md b/docs/pleiad/role-contracts.md
+index 0a3b8c6..8897fa5 100644
+--- a/docs/pleiad/role-contracts.md
++++ b/docs/pleiad/role-contracts.md
+@@ -15,7 +15,7 @@ The executable contracts are the standalone files in `.codex/agents/`. Each decl
+ 
+ The role codes are authoritative for prospective session titles. Unknown codes are invalid.
+ 
+-Model routing is authoritative through the effective validated project policy. Built-in defaults use Luna for straightforward implementation, Terra for nontrivial implementation, Sol for difficult implementation and coordination/design/QA/review work; QA and Reviewer defaults are deterministically Sol/Medium. Every handoff carries explicit Target model, Effort, and one-sentence Rationale. The recommended Astra route is exceptional/High effort; a project may explicitly permit another supported effort, but Astra is never a routine default and every use requires a structured explanation of why Sol is insufficient. Projects can disable Astra. Routing choices cannot change role authority, sandbox, evidence, correction, review, or human-merge constraints.
++Model routing is also authoritative: Coordinator/Product/Architecture use Sol/Medium by default; Implementation uses Luna/Low or Terra for nontrivial work; QA/Reviewer use Sol/Medium; Knowledge Steward uses Luna/Low. Every handoff carries explicit Target model, Effort, and one-sentence Rationale. Corrections return to the same Implementation task using Luna or Terra; Reviewer activation uses Sol/Medium or justified Sol/High.
+ 
+ Roles that write or make material decisions run only in issue-backed user-visible tasks. An agent file is a reusable contract, not permission to invoke that role as an ephemeral subagent. Ephemeral subagents are restricted to bounded read-only information gathering.
+ 
+diff --git a/scripts/coordination_protocol.py b/scripts/coordination_protocol.py
+index 0e5512c..165a299 100644
+--- a/scripts/coordination_protocol.py
++++ b/scripts/coordination_protocol.py
+@@ -63,18 +63,15 @@ ROLE_CODES = {
+     "reviewer": "RV",
+     "knowledge_steward": "KS",
+ }
+-TARGET_MODELS = ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
++TARGET_MODELS = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+ EFFORT_LEVELS = ("Low", "Medium", "High")
+-ROUTING_POLICY_PATH = SCHEMA_PATH.parents[1] / ".pleiad" / "model-routing.json"
+-ROUTING_POLICY_SCHEMA_VERSION = 1
+-DEFAULT_ROUTING_MATRIX = {
++ROUTING_MATRIX = {
+     "coordinator": {"gpt-5.6-sol": {"Medium"}},
+     "product": {"gpt-5.6-sol": {"Medium"}},
+     "architecture": {"gpt-5.6-sol": {"Medium"}},
+     "implementation": {
+         "gpt-5.6-luna": {"Low"},
+         "gpt-5.6-terra": {"Low", "Medium", "High"},
+-        "gpt-5.6-sol": {"Medium", "High"},
+     },
+     "qa": {"gpt-5.6-sol": {"Medium", "High"}},
+     "reviewer": {"gpt-5.6-sol": {"Medium", "High"}},
+@@ -84,21 +81,18 @@ DEFAULT_ROUTING_MATRIX = {
+     },
+     "human_owner": {"gpt-5.6-sol": {"Medium"}},
+ }
+-DEFAULT_ROLE_DEFAULTS = {
+-    "coordinator": {"model": "gpt-5.6-sol", "effort": "Medium"},
+-    "product": {"model": "gpt-5.6-sol", "effort": "Medium"},
+-    "architecture": {"model": "gpt-5.6-sol", "effort": "Medium"},
+-    "implementation": {"model": "gpt-5.6-luna", "effort": "Low"},
+-    "qa": {"model": "gpt-5.6-sol", "effort": "Medium"},
+-    "reviewer": {"model": "gpt-5.6-sol", "effort": "Medium"},
+-    "knowledge_steward": {"model": "gpt-5.6-luna", "effort": "Low"},
+-    "human_owner": {"model": "gpt-5.6-sol", "effort": "Medium"},
+-}
+-ROUTING_POLICY_VERSION = "project-owned-v2"
++ROUTING_POLICY_VERSION = "repository-native-v1"
+ ROUTING_CONFIG_LINES = (
+-    "routing_policy: project-owned-v2",
+-    "routing_policy_path: .pleiad/model-routing.json",
+-    "routing_policy_defaults: embedded-in-scripts/coordination_protocol.py",
++    "routing_policy: repository-native-v1",
++    "routing_matrix:",
++    '  coordinator: "gpt-5.6-sol/Medium"',
++    '  product: "gpt-5.6-sol/Medium"',
++    '  architecture: "gpt-5.6-sol/Medium"',
++    '  implementation: "gpt-5.6-luna/Low|gpt-5.6-terra/Low..High"',
++    '  qa: "gpt-5.6-sol/Medium|High-with-risk-rationale"',
++    '  reviewer: "gpt-5.6-sol/Medium|High-with-risk-rationale"',
++    '  knowledge_steward: "gpt-5.6-luna/Low|gpt-5.6-sol/Medium-with-decision-rationale"',
++    '  ephemeral_research: "gpt-5.6-luna/Low|gpt-5.6-terra/Low|gpt-5.6-sol/exceptional-rationale"',
+ )
+ LIFECYCLE_CONFIG_LINES = (
+     "lifecycle_policy: delivery-cell-v1",
+@@ -171,160 +165,8 @@ def validate_session_title_config(config_text: str) -> list[str]:
+     return errors
+ 
+ 
+-def default_routing_policy() -> dict[str, Any]:
+-    """Return a detached copy of the safe built-in policy."""
+-
+-    return {
+-        "schema_version": ROUTING_POLICY_SCHEMA_VERSION,
+-        "astra_enabled": True,
+-        "role_defaults": {role: dict(route) for role, route in DEFAULT_ROLE_DEFAULTS.items()},
+-        "allowed_routes": {
+-            role: [
+-                *[
+-                    {"model": model, "efforts": sorted(efforts, key=EFFORT_LEVELS.index)}
+-                    for model, efforts in routes.items()
+-                ],
+-                {"model": "gpt-6-astra", "efforts": ["High"]},
+-            ]
+-            for role, routes in DEFAULT_ROUTING_MATRIX.items()
+-        },
+-    }
+-
+-
+-def _policy_error(path: str, message: str) -> str:
+-    return f"routing policy {path} {message}"
+-
+-
+-def validate_routing_policy(policy: Any) -> list[str]:
+-    """Validate the project-owned JSON override without relaxing delivery safety."""
+-
+-    if not isinstance(policy, dict):
+-        return ["routing policy must be a JSON object"]
+-    allowed_fields = {"schema_version", "astra_enabled", "role_defaults", "allowed_routes"}
+-    errors = [_policy_error(key, "is not supported") for key in sorted(set(policy) - allowed_fields)]
+-    if policy.get("schema_version") != ROUTING_POLICY_SCHEMA_VERSION:
+-        errors.append(_policy_error("schema_version", f"must equal {ROUTING_POLICY_SCHEMA_VERSION}"))
+-    if not isinstance(policy.get("astra_enabled"), bool):
+-        errors.append(_policy_error("astra_enabled", "must be true or false"))
+-    defaults = policy.get("role_defaults")
+-    routes = policy.get("allowed_routes")
+-    if not isinstance(defaults, dict):
+-        errors.append(_policy_error("role_defaults", "must be an object"))
+-        defaults = {}
+-    if not isinstance(routes, dict):
+-        errors.append(_policy_error("allowed_routes", "must be an object"))
+-        routes = {}
+-    supported_roles = set(DEFAULT_ROUTING_MATRIX)
+-    for role in sorted(supported_roles - set(defaults)):
+-        errors.append(_policy_error("role_defaults", f"is missing required role {role!r}"))
+-    for role in sorted(supported_roles - set(routes)):
+-        errors.append(_policy_error("allowed_routes", f"is missing required role {role!r}"))
+-    for group_name, group in (("role_defaults", defaults), ("allowed_routes", routes)):
+-        for role in sorted(set(group) - supported_roles):
+-            errors.append(_policy_error(f"{group_name}.{role}", "names an unsupported role"))
+-    parsed_routes: dict[str, set[tuple[str, str]]] = {}
+-    for role, configured in routes.items():
+-        if role not in supported_roles:
+-            continue
+-        if not isinstance(configured, list) or not configured:
+-            errors.append(_policy_error(f"allowed_routes.{role}", "must be a non-empty list"))
+-            continue
+-        pairs: set[tuple[str, str]] = set()
+-        for index, item in enumerate(configured):
+-            path = f"allowed_routes.{role}[{index}]"
+-            if not isinstance(item, dict) or set(item) != {"model", "efforts"}:
+-                errors.append(_policy_error(path, "must contain only model and efforts"))
+-                continue
+-            model, efforts = item.get("model"), item.get("efforts")
+-            if model not in TARGET_MODELS:
+-                errors.append(_policy_error(f"{path}.model", f"is unsupported: {model!r}"))
+-                continue
+-            if not isinstance(efforts, list) or not efforts:
+-                errors.append(_policy_error(f"{path}.efforts", "must be a non-empty list"))
+-                continue
+-            for effort in efforts:
+-                if effort not in EFFORT_LEVELS:
+-                    errors.append(_policy_error(f"{path}.efforts", f"contains unsupported effort {effort!r}"))
+-                elif (model, effort) in pairs:
+-                    errors.append(_policy_error(path, "contains a duplicate model/effort route"))
+-                else:
+-                    pairs.add((model, effort))
+-        parsed_routes[role] = pairs
+-    for role, configured in defaults.items():
+-        if role not in supported_roles:
+-            continue
+-        path = f"role_defaults.{role}"
+-        if not isinstance(configured, dict) or set(configured) != {"model", "effort"}:
+-            errors.append(_policy_error(path, "must contain only model and effort"))
+-            continue
+-        model, effort = configured.get("model"), configured.get("effort")
+-        if model == "gpt-6-astra":
+-            errors.append(_policy_error(path, "cannot use Astra as a routine default"))
+-        if (model, effort) not in parsed_routes.get(role, set()):
+-            errors.append(_policy_error(path, "must be one of that role's allowed routes"))
+-    return errors
+-
+-
+-def load_routing_policy(path: Path | None = None) -> tuple[dict[str, Any], list[str]]:
+-    """Load defaults or the complete project-owned replacement policy."""
+-
+-    path = path or ROUTING_POLICY_PATH
+-    if not path.exists():
+-        return default_routing_policy(), []
+-    try:
+-        policy = json.loads(path.read_text(encoding="utf-8"))
+-    except (OSError, json.JSONDecodeError) as exc:
+-        return {}, [f"routing policy {path} is not valid JSON: {exc}"]
+-    errors = validate_routing_policy(policy)
+-    return (policy if not errors else {}), errors
+-
+-
+-def policy_route_matrix(policy: dict[str, Any]) -> dict[str, dict[str, set[str]]]:
+-    matrix: dict[str, dict[str, set[str]]] = {}
+-    for role, routes in policy["allowed_routes"].items():
+-        matrix[role] = {}
+-        for route in routes:
+-            matrix[role].setdefault(route["model"], set()).update(route["efforts"])
+-    return matrix
+-
+-
+-def resolve_routing_defaults(value: Any, policy_path: Path | None = None) -> tuple[dict[str, Any] | None, list[str]]:
+-    """Materialize a role's configured default route before any dispatch."""
+-
+-    if not isinstance(value, dict):
+-        return None, ["handoff must be an object before routing defaults can be resolved"]
+-    policy, errors = load_routing_policy(policy_path)
+-    if errors:
+-        return None, errors
+-    resolved = dict(value)
+-    model_present = "target_model" in resolved
+-    effort_present = "effort" in resolved
+-    if model_present != effort_present:
+-        return None, ["target_model and effort must be supplied together or both resolved from the role default"]
+-    if not model_present:
+-        role = resolved.get("to_role")
+-        default = policy.get("role_defaults", {}).get(role)
+-        if not isinstance(default, dict):
+-            return None, [f"routing policy has no default route for role {role!r}"]
+-        resolved["target_model"] = default["model"]
+-        resolved["effort"] = default["effort"]
+-    return resolved, []
+-
+-
+-def validate_host_availability(value: dict[str, Any], available_routes: dict[str, Any] | None) -> list[str]:
+-    """Reject a policy-valid route that the actual destination host cannot run."""
+-
+-    if not isinstance(available_routes, dict):
+-        return ["host model availability is required before transport"]
+-    model, effort = value.get("target_model"), value.get("effort")
+-    available_efforts = available_routes.get(model)
+-    if not isinstance(available_efforts, (list, tuple, set)) or effort not in available_efforts:
+-        return [f"requested route {model}/{effort} is unavailable on the destination host; do not substitute a model"]
+-    return []
+-
+-
+-def validate_routing(value: dict[str, Any], policy_path: Path | None = None) -> list[str]:
+-    """Enforce the project-owned routing policy and explicit activation."""
++def validate_routing(value: dict[str, Any]) -> list[str]:
++    """Enforce the repository-native model/effort policy and explicit activation."""
+ 
+     errors: list[str] = []
+     target_role = value.get("to_role")
+@@ -333,10 +175,6 @@ def validate_routing(value: dict[str, Any], policy_path: Path | None = None) ->
+     mode = value.get("execution_mode")
+     sandbox = value.get("sandbox_mode")
+     rationale = value.get("rationale", "")
+-    policy, policy_errors = load_routing_policy(policy_path)
+-    if policy_errors:
+-        return policy_errors
+-    matrix = policy_route_matrix(policy)
+     if mode == "ephemeral_research":
+         if model not in TARGET_MODELS:
+             errors.append(f"ephemeral_research cannot route to target model {model!r}")
+@@ -346,14 +184,12 @@ def validate_routing(value: dict[str, Any], policy_path: Path | None = None) ->
+             errors.append("ephemeral Terra routing is limited to Low effort")
+         elif model == "gpt-5.6-sol" and "exceptional" not in rationale.lower():
+             errors.append("ephemeral Sol routing requires an explicit exceptional rationale")
+-        elif model == "gpt-6-astra":
+-            errors.append("ephemeral research cannot use Astra")
+         if sandbox != "read-only":
+             errors.append("ephemeral_research handoffs must be read-only")
+     elif mode == "durable":
+-        if target_role not in matrix:
++        if target_role not in ROUTING_MATRIX:
+             return [f"handoff.to_role has no routing policy: {target_role!r}"]
+-        allowed_models = matrix[target_role]
++        allowed_models = ROUTING_MATRIX[target_role]
+         if model not in TARGET_MODELS or model not in allowed_models:
+             errors.append(f"{target_role} cannot route to target model {model!r}")
+         elif effort not in allowed_models[model]:
+@@ -367,22 +203,25 @@ def validate_routing(value: dict[str, Any], policy_path: Path | None = None) ->
+     else:
+         errors.append(f"unknown execution mode: {mode!r}")
+ 
+-    if mode == "durable" and model == "gpt-6-astra":
+-        escalation = value.get("exceptional_escalation")
+-        if not policy.get("astra_enabled"):
+-            errors.append("Astra is disabled by the project routing policy")
+-        if not isinstance(escalation, dict) or set(escalation) != {"difficulty", "sol_insufficiency"}:
+-            errors.append("Astra routing requires exceptional_escalation with difficulty and sol_insufficiency")
+-        elif escalation.get("difficulty") != "exceptional" or not isinstance(escalation.get("sol_insufficiency"), str) or len(escalation["sol_insufficiency"].strip()) < 20:
+-            errors.append("Astra escalation must declare exceptional difficulty and concretely explain why Sol is insufficient")
+-    elif value.get("exceptional_escalation") is not None:
+-        errors.append("exceptional_escalation is only valid for Astra routing")
++    if mode == "durable" and model == "gpt-5.6-terra" and effort in {"Medium", "High"}:
++        lowered = rationale.lower()
++        if "risk" not in lowered and "complex" not in lowered:
++            errors.append("Terra effort above Low requires an explicit risk/complexity rationale")
++    if mode == "durable" and target_role in {"qa", "reviewer"} and effort == "High":
++        if "risk" not in rationale.lower():
++            errors.append(f"{target_role} High effort requires an explicit high-risk rationale")
++    if mode == "durable" and target_role == "knowledge_steward" and model == "gpt-5.6-sol" and "decision" not in rationale.lower():
++        errors.append("Knowledge Steward Sol routing requires a decision-heavy rationale")
+ 
+     if value.get("is_correction"):
+         if target_role != "implementation":
+             errors.append("corrections must return to the implementation role")
++        if model not in {"gpt-5.6-luna", "gpt-5.6-terra"}:
++            errors.append("corrections must use an allowed implementation model")
+         if mode != "durable":
+             errors.append("corrections require durable delivery")
++    if mode == "durable" and target_role == "reviewer" and model != "gpt-5.6-sol":
++        errors.append("Reviewer activation must use gpt-5.6-sol")
+     return errors
+ 
+ 
+@@ -484,6 +323,8 @@ def validate_lifecycle_handoff(value: dict[str, Any]) -> list[str]:
+     if state == LifecycleState.REVIEW_ACTIVE.value:
+         if value.get("to_role") != "reviewer":
+             errors.append("REVIEW_ACTIVE handoffs must explicitly activate Reviewer")
++        if value.get("target_model") != "gpt-5.6-sol" or value.get("effort") != "Medium":
++            errors.append("REVIEW_ACTIVE must activate Reviewer with Sol/Medium")
+     if state == LifecycleState.CORRECTION_ACTIVE.value:
+         if value.get("to_role") != "implementation" or not value.get("is_correction"):
+             errors.append("CORRECTION_ACTIVE must return to the same Implementation task")
+@@ -1325,13 +1166,13 @@ def _validate_schema(
+     return errors
+ 
+ 
+-def validate_handoff(value: Any, schema: dict[str, Any] | None = None, policy_path: Path | None = None) -> list[str]:
++def validate_handoff(value: Any, schema: dict[str, Any] | None = None) -> list[str]:
+     authoritative_schema = schema or json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+     compatibility_errors = _schema_support_errors(authoritative_schema)
+     schema_errors = _validate_schema(value, authoritative_schema, authoritative_schema, "handoff")
+     if compatibility_errors or schema_errors or not isinstance(value, dict):
+         return compatibility_errors or schema_errors
+-    return validate_routing(value, policy_path) + validate_lifecycle_handoff(value)
++    return validate_routing(value) + validate_lifecycle_handoff(value)
+ 
+ 
+ def pre_dispatch_handoff(
+@@ -1339,8 +1180,6 @@ def pre_dispatch_handoff(
+     dispatch: Callable[[dict[str, Any]], Any],
+     *,
+     action: str,
+-    available_routes: dict[str, Any] | None = None,
+-    policy_path: Path | None = None,
+ ) -> Any:
+     """Validate the complete envelope before an issue-backed side effect.
+ 
+@@ -1349,25 +1188,22 @@ def pre_dispatch_handoff(
+     transport adapters from becoming a second handoff authority.
+     """
+ 
+-    resolved, resolution_errors = resolve_routing_defaults(value, policy_path)
+-    errors = resolution_errors or validate_handoff(resolved, policy_path=policy_path)
+-    if not errors and resolved is not None:
+-        errors = validate_host_availability(resolved, available_routes)
++    errors = validate_handoff(value)
+     if errors:
+         detail = "; ".join(errors[:4])
+         if len(errors) > 4:
+             detail += f"; and {len(errors) - 4} more"
+         raise LifecycleTransitionError(f"{action} blocked by invalid handoff: {detail}")
+-    return dispatch(resolved)
++    return dispatch(value)
+ 
+ 
+-def dispatch_issue_task(value: Any, create_task: Callable[[dict[str, Any]], Any], *, available_routes: dict[str, Any] | None = None, policy_path: Path | None = None) -> Any:
++def dispatch_issue_task(value: Any, create_task: Callable[[dict[str, Any]], Any]) -> Any:
+     """Canonical pre-dispatch path for creating a durable role task."""
+ 
+-    return pre_dispatch_handoff(value, create_task, action="issue-backed task creation", available_routes=available_routes, policy_path=policy_path)
++    return pre_dispatch_handoff(value, create_task, action="issue-backed task creation")
+ 
+ 
+-def send_cross_task_handoff(value: Any, send: Callable[[dict[str, Any]], Any], *, available_routes: dict[str, Any] | None = None, policy_path: Path | None = None) -> Any:
++def send_cross_task_handoff(value: Any, send: Callable[[dict[str, Any]], Any]) -> Any:
+     """Canonical pre-dispatch path for a required peer handoff/wake-up."""
+ 
+-    return pre_dispatch_handoff(value, send, action="cross-task send", available_routes=available_routes, policy_path=policy_path)
++    return pre_dispatch_handoff(value, send, action="cross-task send")
+diff --git a/scripts/pretool_handoff_guard.py b/scripts/pretool_handoff_guard.py
+index 7bd96e9..a44de64 100644
+--- a/scripts/pretool_handoff_guard.py
++++ b/scripts/pretool_handoff_guard.py
+@@ -42,9 +42,9 @@ def is_pleiad_project(root: Path) -> bool:
+ 
+ def canonical_validator(root: Path):
+     sys.path.insert(0, str(root / "scripts"))
+-    from coordination_protocol import resolve_routing_defaults, validate_handoff, validate_host_availability  # noqa: PLC0415
++    from coordination_protocol import validate_handoff  # noqa: PLC0415
+ 
+-    return resolve_routing_defaults, validate_handoff, validate_host_availability
++    return validate_handoff
+ 
+ 
+ def _json_object(text: str) -> dict[str, Any] | None:
+@@ -115,16 +115,7 @@ def evaluate(event: dict[str, Any], root: Path | None = None) -> dict[str, Any]
+     envelope = extract_envelope(event.get("tool_input"))
+     if envelope is None:
+         return denial(["missing versioned Pleiad envelope in tool_input prompt or metadata"])
+-    resolve_defaults, validate, _ = canonical_validator(resolved_root)
+-    resolved_envelope, errors = resolve_defaults(envelope)
+-    if not errors and resolved_envelope is not None:
+-        errors = validate(resolved_envelope)
+-    tool_input = event.get("tool_input")
+-    if not errors and resolved_envelope is not None:
+-        expected_model = resolved_envelope["target_model"]
+-        expected_effort = resolved_envelope["effort"].lower()
+-        if not isinstance(tool_input, dict) or tool_input.get("model") != expected_model or tool_input.get("thinking") != expected_effort:
+-            errors = ["native tool model and thinking must explicitly match the resolved routing policy before dispatch"]
++    errors = canonical_validator(resolved_root)(envelope)
+     return denial(errors) if errors else None
+ 
+ 
+diff --git a/scripts/validate_hooks.py b/scripts/validate_hooks.py
+index 1fb7f84..d27b6fd 100644
+--- a/scripts/validate_hooks.py
++++ b/scripts/validate_hooks.py
+@@ -50,8 +50,8 @@ def main() -> int:
+         print("repository hook command must be cross-platform and resolve from the Git root", file=sys.stderr)
+         return 2
+     template = json.loads((ROOT / ".pleiad" / "handoff-template.json").read_text(encoding="utf-8"))
+-    valid = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(template), "model": "gpt-5.6-sol", "thinking": "medium"}})
+-    legacy = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(template), "model": "gpt-5.6-sol", "thinking": "medium"}})
++    valid = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(template)}})
++    legacy = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(template)}})
+     invalid = run_guard({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: {\"schema_version\": \"1.0.0\"}"}})
+     if valid.returncode != 0 or valid.stdout.strip():
+         print("valid native-task hook probe was not allowed", file=sys.stderr)

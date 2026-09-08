@@ -315,6 +315,18 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         legacy_allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(legacy_event), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(legacy_allowed.returncode, 0)
         self.assertEqual(legacy_allowed.stdout.strip(), "")
+        incomplete_route = self.handoff()
+        incomplete_route.pop("target_model")
+        incomplete_route.pop("effort")
+        incomplete_denied = subprocess.run(
+            [sys.executable, str(guard)],
+            input=json.dumps({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(incomplete_route), "model": "gpt-5.6-sol", "thinking": "medium"}}),
+            text=True,
+            capture_output=True,
+            cwd=ROOT,
+            check=False,
+        )
+        self.assertIn('"permissionDecision": "deny"', incomplete_denied.stdout)
         invalid = self.handoff()
         invalid["objective"] = ""
         denied = subprocess.run([sys.executable, str(guard)], input=json.dumps({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"metadata": {"handoff": invalid}}}), text=True, capture_output=True, cwd=ROOT, check=False)
@@ -1362,27 +1374,42 @@ class RepositoryStateTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, temporary, ignore_errors=True)
         target = temporary / "released-v1"
         target.mkdir()
-        files: dict[str, str] = {}
+        # The fixture is a reverse patch and managed-state file copied from the
+        # published v1.0.0 commit.  It intentionally has no Git-history or
+        # network dependency: applying it to the current managed templates
+        # reconstructs the released bytes, which are then verified against the
+        # recorded release hashes before the upgrade is planned.
         for relative in manage_repository.PRE_ROUTING_MANAGED_PATHS:
-            # This is the released v1.0.0 schema-2 path set before this issue
-            # added configure_routing.py.  Template content is intentionally
-            # local so CI does not depend on checkout depth or network history.
             text = manage_repository.template_text(relative, "Pleiad")
             path = target / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-            files[relative.as_posix()] = manage_repository.digest_bytes(text.encode("utf-8"))
+        patch = ROOT / "tests" / "fixtures" / "v1_0_0_routing_upgrade.patch"
+        applied = subprocess.run(
+            ["git", "apply", f"--directory={target}", str(patch)],
+            text=True,
+            capture_output=True,
+            cwd=ROOT,
+            check=False,
+        )
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        released = json.loads((ROOT / "tests" / "fixtures" / "v1_0_0_managed.json").read_text(encoding="utf-8"))
+        files = released["files"]
+        self.assertEqual(set(files), {relative.as_posix() for relative in manage_repository.PRE_ROUTING_MANAGED_PATHS})
+        self.assertTrue(all(manage_repository.digest_path(target / relative) == digest for relative, digest in files.items()))
         agents = manage_repository.desired_agents_text()
         (target / "AGENTS.md").write_text(agents, encoding="utf-8")
         override = json.dumps(default_routing_policy(), indent=2, sort_keys=True) + "\n"
         override_path = target / ".pleiad/model-routing.json"
         override_path.write_text(override, encoding="utf-8")
-        manifest = {"schema_version": 2, "plugin_version": "1.0.0", "project_name": "Pleiad", "files": files, "managed_blocks": {"AGENTS.md": manage_repository.digest_bytes(manage_repository.extract_agents_block(agents).encode("utf-8"))}}
+        manifest = {"schema_version": 2, "plugin_version": "1.0.0", "project_name": "Pleiad", "files": files, "managed_blocks": released["managed_blocks"]}
         manifest_path = target / ".pleiad/managed.json"
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         actions, writes, obsolete = manage_repository.plan(target, "Pleiad")
         self.assertFalse([action for action in actions if action.classification == "conflict"])
         self.assertIn(("create", "scripts/configure_routing.py"), {(action.classification, action.path.as_posix()) for action in actions})
+        updates = {action.path.as_posix() for action in actions if action.classification == "update"}
+        self.assertTrue({"scripts/coordination_protocol.py", ".codex/agents/implementation.toml"} <= updates)
         manage_repository.apply(target, writes, obsolete, "Pleiad")
         self.assertEqual(override_path.read_text(encoding="utf-8"), override)
         repeat, _, _ = manage_repository.plan(target, "Pleiad")
