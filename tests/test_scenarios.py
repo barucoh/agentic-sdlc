@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -1374,38 +1375,21 @@ class RepositoryStateTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, temporary, ignore_errors=True)
         target = temporary / "released-v1"
         target.mkdir()
-        # The fixture is a reverse patch and managed-state file copied from the
-        # published v1.0.0 commit.  It intentionally has no Git-history or
-        # network dependency: applying it to the current managed templates
-        # reconstructs the released bytes, which are then verified against the
-        # recorded release hashes before the upgrade is planned.
-        for relative in manage_repository.PRE_ROUTING_MANAGED_PATHS:
-            text = manage_repository.template_text(relative, "Pleiad")
-            path = target / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-        patch = ROOT / "tests" / "fixtures" / "v1_0_0_routing_upgrade.patch"
-        target_relative = target.relative_to(ROOT).as_posix()
-        applied = subprocess.run(
-            ["git", "apply", f"--directory={target_relative}", str(patch)],
-            text=True,
-            capture_output=True,
-            cwd=ROOT,
-            check=False,
-        )
-        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-        released = json.loads((ROOT / "tests" / "fixtures" / "v1_0_0_managed.json").read_text(encoding="utf-8"))
+        # This archive is copied from published v1.0.0 during repository
+        # development.  It contains the complete historical managed tree and
+        # manifest, keeping this upgrade regression independent of Git history,
+        # network access, candidate-template context, and platform patch rules.
+        fixture = ROOT / "tests" / "fixtures" / "v1_0_0_managed.tar.gz"
+        with tarfile.open(fixture, "r:gz") as archive:
+            archive.extractall(target, filter="data")
+        released = json.loads((target / ".pleiad" / "managed.json").read_text(encoding="utf-8"))
         files = released["files"]
         self.assertEqual(set(files), {relative.as_posix() for relative in manage_repository.PRE_ROUTING_MANAGED_PATHS})
         self.assertTrue(all(manage_repository.digest_path(target / relative) == digest for relative, digest in files.items()))
-        agents = manage_repository.desired_agents_text()
-        (target / "AGENTS.md").write_text(agents, encoding="utf-8")
         override = json.dumps(default_routing_policy(), indent=2, sort_keys=True) + "\n"
         override_path = target / ".pleiad/model-routing.json"
         override_path.write_text(override, encoding="utf-8")
-        manifest = {"schema_version": 2, "plugin_version": "1.0.0", "project_name": "Pleiad", "files": files, "managed_blocks": released["managed_blocks"]}
         manifest_path = target / ".pleiad/managed.json"
-        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         actions, writes, obsolete = manage_repository.plan(target, "Pleiad")
         self.assertFalse([action for action in actions if action.classification == "conflict"])
         self.assertIn(("create", "scripts/configure_routing.py"), {(action.classification, action.path.as_posix()) for action in actions})
