@@ -1385,8 +1385,9 @@ class RepositoryStateTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
         patch = ROOT / "tests" / "fixtures" / "v1_0_0_routing_upgrade.patch"
+        target_relative = target.relative_to(ROOT).as_posix()
         applied = subprocess.run(
-            ["git", "apply", f"--directory={target}", str(patch)],
+            ["git", "apply", f"--directory={target_relative}", str(patch)],
             text=True,
             capture_output=True,
             cwd=ROOT,
