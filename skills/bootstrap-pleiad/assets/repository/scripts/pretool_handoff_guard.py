@@ -115,16 +115,16 @@ def evaluate(event: dict[str, Any], root: Path | None = None) -> dict[str, Any] 
     envelope = extract_envelope(event.get("tool_input"))
     if envelope is None:
         return denial(["missing versioned Pleiad envelope in tool_input prompt or metadata"])
-    resolve_defaults, validate, validate_availability = canonical_validator(resolved_root)
+    resolve_defaults, validate, _ = canonical_validator(resolved_root)
     resolved_envelope, errors = resolve_defaults(envelope)
     if not errors and resolved_envelope is not None:
         errors = validate(resolved_envelope)
     tool_input = event.get("tool_input")
-    availability = tool_input.get("available_routes") if isinstance(tool_input, dict) else None
-    if availability is None and isinstance(tool_input, dict) and isinstance(tool_input.get("metadata"), dict):
-        availability = tool_input["metadata"].get("available_routes")
     if not errors and resolved_envelope is not None:
-        errors = validate_availability(resolved_envelope, availability)
+        expected_model = resolved_envelope["target_model"]
+        expected_effort = resolved_envelope["effort"].lower()
+        if not isinstance(tool_input, dict) or tool_input.get("model") != expected_model or tool_input.get("thinking") != expected_effort:
+            errors = ["native tool model and thinking must explicitly match the resolved routing policy before dispatch"]
     return denial(errors) if errors else None
 
 

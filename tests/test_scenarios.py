@@ -307,12 +307,11 @@ class HandoffAndCoordinationTests(unittest.TestCase):
         self.assertNotIn("hooks", json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8")))
         self.assertFalse(any((ROOT / "hooks").iterdir()) if (ROOT / "hooks").is_dir() else False, "the plugin must not register hooks outside an adopted repository")
         guard = ROOT / "scripts/pretool_handoff_guard.py"
-        availability = {"gpt-5.6-sol": ["Medium"], "gpt-5.6-terra": ["Low", "Medium", "High"], "gpt-5.6-luna": ["Low"], "gpt-6-astra": ["High"]}
-        valid_event = {"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(self.handoff()), "available_routes": availability}}
+        valid_event = {"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(self.handoff()), "model": "gpt-5.6-sol", "thinking": "medium"}}
         allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(valid_event), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(allowed.returncode, 0)
         self.assertEqual(allowed.stdout.strip(), "")
-        legacy_event = {"tool_name": "codex_app__create_thread", "tool_input": {"metadata": {"agentic_sdlc_handoff": self.handoff(), "available_routes": availability}}}
+        legacy_event = {"tool_name": "codex_app__create_thread", "tool_input": {"metadata": {"agentic_sdlc_handoff": self.handoff()}, "model": "gpt-5.6-sol", "thinking": "medium"}}
         legacy_allowed = subprocess.run([sys.executable, str(guard)], input=json.dumps(legacy_event), text=True, capture_output=True, cwd=ROOT, check=False)
         self.assertEqual(legacy_allowed.returncode, 0)
         self.assertEqual(legacy_allowed.stdout.strip(), "")
