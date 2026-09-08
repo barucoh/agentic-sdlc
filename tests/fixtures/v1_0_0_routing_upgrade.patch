@@ -519,7 +519,7 @@ index 0e5512c..165a299 100644
 -    return pre_dispatch_handoff(value, send, action="cross-task send", available_routes=available_routes, policy_path=policy_path)
 +    return pre_dispatch_handoff(value, send, action="cross-task send")
 diff --git a/scripts/pretool_handoff_guard.py b/scripts/pretool_handoff_guard.py
-index 7bd96e9..a44de64 100644
+index 8bb23f0..a44de64 100644
 --- a/scripts/pretool_handoff_guard.py
 +++ b/scripts/pretool_handoff_guard.py
 @@ -42,9 +42,9 @@ def is_pleiad_project(root: Path) -> bool:
@@ -534,18 +534,20 @@ index 7bd96e9..a44de64 100644
  
  
  def _json_object(text: str) -> dict[str, Any] | None:
-@@ -115,16 +115,7 @@ def evaluate(event: dict[str, Any], root: Path | None = None) -> dict[str, Any]
+@@ -115,18 +115,7 @@ def evaluate(event: dict[str, Any], root: Path | None = None) -> dict[str, Any]
      envelope = extract_envelope(event.get("tool_input"))
      if envelope is None:
          return denial(["missing versioned Pleiad envelope in tool_input prompt or metadata"])
--    resolve_defaults, validate, _ = canonical_validator(resolved_root)
--    resolved_envelope, errors = resolve_defaults(envelope)
--    if not errors and resolved_envelope is not None:
--        errors = validate(resolved_envelope)
+-    _, validate, _ = canonical_validator(resolved_root)
+-    # The hook observes the envelope already placed in the native prompt or
+-    # metadata; it cannot rewrite that transport payload.  Defaults are
+-    # materialized by the pre-dispatch helper before its callback, while this
+-    # boundary must insist that the on-wire envelope is already schema-valid.
+-    errors = validate(envelope)
 -    tool_input = event.get("tool_input")
--    if not errors and resolved_envelope is not None:
--        expected_model = resolved_envelope["target_model"]
--        expected_effort = resolved_envelope["effort"].lower()
+-    if not errors:
+-        expected_model = envelope["target_model"]
+-        expected_effort = envelope["effort"].lower()
 -        if not isinstance(tool_input, dict) or tool_input.get("model") != expected_model or tool_input.get("thinking") != expected_effort:
 -            errors = ["native tool model and thinking must explicitly match the resolved routing policy before dispatch"]
 +    errors = canonical_validator(resolved_root)(envelope)
@@ -553,10 +555,10 @@ index 7bd96e9..a44de64 100644
  
  
 diff --git a/scripts/validate_hooks.py b/scripts/validate_hooks.py
-index 1fb7f84..d27b6fd 100644
+index d56fc40..d27b6fd 100644
 --- a/scripts/validate_hooks.py
 +++ b/scripts/validate_hooks.py
-@@ -50,8 +50,8 @@ def main() -> int:
+@@ -50,13 +50,9 @@ def main() -> int:
          print("repository hook command must be cross-platform and resolve from the Git root", file=sys.stderr)
          return 2
      template = json.loads((ROOT / ".pleiad" / "handoff-template.json").read_text(encoding="utf-8"))
@@ -565,5 +567,20 @@ index 1fb7f84..d27b6fd 100644
 +    valid = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(template)}})
 +    legacy = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "ASDLC_HANDOFF: " + json.dumps(template)}})
      invalid = run_guard({"tool_name": "codex_app__send_message_to_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: {\"schema_version\": \"1.0.0\"}"}})
+-    incomplete = dict(template)
+-    incomplete.pop("target_model")
+-    incomplete.pop("effort")
+-    incomplete_route = run_guard({"tool_name": "codex_app__create_thread", "tool_input": {"prompt": "PLEIAD_HANDOFF: " + json.dumps(incomplete), "model": "gpt-5.6-sol", "thinking": "medium"}})
      if valid.returncode != 0 or valid.stdout.strip():
          print("valid native-task hook probe was not allowed", file=sys.stderr)
+         return 2
+@@ -72,9 +68,6 @@ def main() -> int:
+     if invalid.returncode != 0 or denial["hookSpecificOutput"].get("permissionDecision") != "deny" or "PLEIAD_HANDOFF_INVALID" not in reason:
+         print("invalid native-task hook probe was not denied", file=sys.stderr)
+         return 2
+-    if incomplete_route.returncode != 0 or '"permissionDecision": "deny"' not in incomplete_route.stdout:
+-        print("incomplete on-wire routing fields were not denied", file=sys.stderr)
+-        return 2
+     print("Validated repository-native task-boundary hook contract for codex_app__create_thread and codex_app__send_message_to_thread")
+     return 0
+ 
